@@ -50,19 +50,24 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, ac
         {/* Account Summaries - Compact Professional View */}
         <div className="bg-slate-900/40 p-3 rounded-2xl border border-slate-800/50">
           <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Live Liquidity</p>
-          <div className="space-y-2">
-            {accounts.slice(0, 3).map(acc => (
-              <div key={acc.id} className="flex justify-between items-center">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1">
-                  {acc.id === 'cash' ? '💵' : '🏦'} {acc.name.split(' ')[0]}
+          <div className="grid grid-cols-2 gap-2">
+            {accounts.slice(0, 4).map(acc => (
+              <div key={acc.id} className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1 mb-1">
+                  {acc.id === 'cash' ? '💵' : '🏦'}
                 </span>
-                <span className="text-[11px] font-black font-mono text-white">
+                <p className="text-[9px] font-black font-mono text-white leading-tight">
                   {Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 0 })}
-                </span>
+                </p>
+                <p className="text-[7px] text-slate-500 uppercase font-bold truncate mt-0.5">
+                  {acc.name.split(' ')[0]}
+                </p>
               </div>
             ))}
-            {accounts.length > 3 && (
-              <p className="text-[8px] text-slate-600 text-center pt-1">+{accounts.length - 3} more</p>
+            {accounts.length > 4 && (
+              <div className="bg-slate-800/20 p-2 rounded-lg border border-slate-700/20 flex items-center justify-center">
+                <p className="text-[8px] text-slate-600 font-bold">+{accounts.length - 4}</p>
+              </div>
             )}
           </div>
         </div>
