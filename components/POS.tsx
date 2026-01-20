@@ -184,7 +184,7 @@ const POS: React.FC<POSProps> = ({
       accountId: (paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') ? accountId : 'cash',
       customerId,
       description: `Sale: ${cart.length} SKUs`,
-      date: new Date().toISOString(),
+      date: getTodayLocal() + 'T' + new Date().toTimeString().split(' ')[0],
       chequeNumber: paymentMethod === 'CHEQUE' ? chequeNumber : undefined,
       chequeDate: paymentMethod === 'CHEQUE' ? chequeDate : undefined,
       items: cart.map(i => {
