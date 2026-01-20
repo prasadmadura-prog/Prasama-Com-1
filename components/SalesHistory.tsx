@@ -52,6 +52,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     }
   }, [editingTx]);
 
+  // Update endDate whenever component re-renders to ensure today's sales always show
+  useEffect(() => {
+    setEndDate(getTodayLocal());
+  }, []);
+
   // Include Sales and Credit Payments
   const ledgerEntries = useMemo(() => {
     if (!Array.isArray(transactions)) return [];
