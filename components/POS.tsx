@@ -177,7 +177,7 @@ const POS: React.FC<POSProps> = ({
     const txId = `TX-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
     const txPayload = {
       id: txId,
-      type: 'POS_SALE',
+      type: 'SALE',
       amount: totals.finalTotal,
       discount: totals.lineSavings + totals.globalDiscountAmt,
       paymentMethod,
