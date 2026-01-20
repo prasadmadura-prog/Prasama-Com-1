@@ -1,0 +1,39 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
+// firebase.js
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyBaqtDnkyQVqOItmUTDOBvhOVtBDYRsOyQ",
+  authDomain: "prasama-1984c.firebaseapp.com",
+  projectId: "prasama-1984c",
+  storageBucket: "prasama-1984c.firebasestorage.app",
+  messagingSenderId: "703953550630",
+  appId: "1:703953550630:web:ad3fc37647050a488515e7"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+// Initialize services
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+export default app;
