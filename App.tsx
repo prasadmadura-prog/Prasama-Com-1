@@ -133,7 +133,7 @@ const App: React.FC = () => {
       // 3. Save Transaction with normalized Type
       const normalizedTx = {
         ...tx,
-        type: 'SALE' as const, // Explicitly enforce SALE type
+        type: tx.type, // Preserve transaction type (SALE, POS_SALE, etc.)
         updatedAt: new Date().toISOString()
       };
       

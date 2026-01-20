@@ -52,10 +52,10 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     }
   }, [editingTx]);
 
-  // Include Sales and Credit Payments
+  // Include Sales and Credit Payments (excludes POS sales)
   const ledgerEntries = useMemo(() => {
     if (!Array.isArray(transactions)) return [];
-    return transactions.filter(t => t && (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || t.type === 'sale'));
+    return transactions.filter(t => t && (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || t.type === 'sale') && t.type !== 'POS_SALE');
   }, [transactions]);
 
   const filteredEntries = useMemo(() => {
