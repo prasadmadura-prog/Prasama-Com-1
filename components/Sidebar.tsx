@@ -53,9 +53,9 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, ac
           <div className="grid grid-cols-2 gap-2">
             {accounts.slice(0, 4).map(acc => (
               <div key={acc.id} className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
-                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight flex items-center gap-1 mb-1">
+                <div className="text-base mb-1">
                   {acc.id === 'cash' ? '💵' : '🏦'}
-                </span>
+                </div>
                 <p className="text-[9px] font-black font-mono text-white leading-tight">
                   {Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 0 })}
                 </p>
