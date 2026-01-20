@@ -35,53 +35,53 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, ac
     .slice(0, 2);
 
   return (
-    <div className="w-[280px] h-full bg-[#0f172a] text-slate-300 flex flex-col border-r border-slate-800/50 shadow-2xl z-20">
-      <div className="px-8 pt-10 pb-6">
-        <div className="flex items-center gap-3 mb-10">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-[0_0_20px_rgba(79,70,229,0.4)]">
-            <span className="font-black text-xl italic">P</span>
+    <div className="w-[260px] h-full bg-[#0f172a] text-slate-300 flex flex-col border-r border-slate-800/50 shadow-2xl z-20">
+      <div className="px-4 pt-6 pb-4">
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-lg">
+            <span className="font-black text-lg italic">P</span>
           </div>
           <div className="overflow-hidden">
-            <h1 className="text-sm font-black tracking-tight text-white leading-tight truncate uppercase">{userProfile.name}</h1>
-            <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-[0.1em]">Strategic Suite</p>
+            <h1 className="text-xs font-black tracking-tight text-white leading-tight truncate uppercase">{userProfile.name}</h1>
+            <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-wider">Strategic Suite</p>
           </div>
         </div>
 
-        {/* Account Summaries - Persistent Top-Left View */}
-        <div className="space-y-4 bg-slate-900/40 p-5 rounded-3xl border border-slate-800/50">
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mb-2">Live Liquidity</p>
-          <div className="space-y-3">
-            {accounts.map(acc => (
-              <div key={acc.id} className="flex flex-col">
-                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5 mb-0.5">
-                  {acc.id === 'cash' ? '💵' : '🏦'} {acc.name}
+        {/* Account Summaries - Compact Professional View */}
+        <div className="bg-slate-900/40 p-3 rounded-2xl border border-slate-800/50">
+          <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Live Liquidity</p>
+          <div className="space-y-2">
+            {accounts.slice(0, 3).map(acc => (
+              <div key={acc.id} className="flex justify-between items-center">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                  {acc.id === 'cash' ? '💵' : '🏦'} {acc.name.split(' ')[0]}
                 </span>
-                <span className="text-[13px] font-black font-mono text-white">
-                  Rs. {Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                <span className="text-[11px] font-black font-mono text-white">
+                  {Number(acc.balance).toLocaleString(undefined, { minimumFractionDigits: 0 })}
                 </span>
               </div>
             ))}
-            {accounts.length === 0 && (
-              <p className="text-[10px] font-black text-slate-600 uppercase italic">No Active Nodes</p>
+            {accounts.length > 3 && (
+              <p className="text-[8px] text-slate-600 text-center pt-1">+{accounts.length - 3} more</p>
             )}
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar pt-2">
+      <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto custom-scrollbar">
         {menuItems.map((item) => {
           const isActive = currentView === item.id;
           return (
             <button
               key={item.id}
               onClick={() => setView(item.id as View)}
-              className={`w-full group flex items-center px-5 py-4 text-[12px] font-black uppercase tracking-widest rounded-2xl transition-all duration-300 ${
+              className={`w-full group flex items-center px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide rounded-xl transition-all duration-200 ${
                 isActive 
-                  ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-600/20' 
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
                   : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-200'
               }`}
             >
-              <span className={`mr-4 text-lg transition-transform group-hover:scale-110 ${isActive ? 'opacity-100' : 'opacity-40'}`}>
+              <span className={`mr-3 text-base transition-transform group-hover:scale-110 ${isActive ? 'opacity-100' : 'opacity-40'}`}>
                 {item.icon}
               </span>
               {item.label}
@@ -90,23 +90,23 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, ac
         })}
       </nav>
 
-      <div className="p-4 mt-auto border-t border-slate-800/30 space-y-2">
+      <div className="p-3 mt-auto border-t border-slate-800/30 space-y-1.5">
         <button 
           onClick={onEditProfile}
-          className="w-full flex items-center gap-3 bg-slate-900/30 p-4 rounded-2xl border border-slate-800/30 hover:bg-slate-800/60 transition-all text-left group"
+          className="w-full flex items-center gap-2.5 bg-slate-900/30 p-3 rounded-xl border border-slate-800/30 hover:bg-slate-800/60 transition-all text-left group"
         >
-          <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-black text-indigo-400">
+          <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-black text-indigo-400">
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-white truncate uppercase tracking-tighter">{userProfile.name}</p>
-            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight truncate">{userProfile.branch}</p>
+            <p className="text-[10px] font-bold text-white truncate uppercase tracking-tight">{userProfile.name}</p>
+            <p className="text-[8px] text-slate-500 font-bold uppercase tracking-tight truncate">{userProfile.branch}</p>
           </div>
         </button>
 
         <button 
           onClick={onLogout}
-          className="w-full flex items-center gap-3 px-5 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-rose-400 transition-all duration-200"
+          className="w-full flex items-center gap-2 px-4 py-2 text-[9px] font-black uppercase tracking-wide text-slate-500 hover:text-rose-400 transition-all duration-200"
         >
           <span>🚪</span> Exit Terminal
         </button>
