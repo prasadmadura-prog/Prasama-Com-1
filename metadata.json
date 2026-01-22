@@ -1,7 +1,0 @@
-{
-  "name": "PRASAMA(PVT)LTD ERP & POS",
-  "description": "A comprehensive business management suite featuring POS, Inventory, Finance, Barcode generation, and Cheque printing with AI business insights.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}
