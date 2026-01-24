@@ -9,10 +9,11 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "rewrites": [
+    "redirects": [
       {
         "source": "**",
-        "destination": "/index.html"
+        "destination": "https://prasama-pvt-ltd-erp-pos-147440081288.us-west1.run.app/",
+        "type": 302
       }
     ]
   }
