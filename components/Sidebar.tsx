@@ -26,7 +26,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, ac
     { id: 'CUSTOMERS', label: 'Customers', icon: '👥' },
     { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '🖨️' },
     { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '🏷️' },
-    { id: 'AUDIT_TRAIL', label: 'Audit Trail', icon: '📝' },
     { id: 'SETTINGS', label: 'Settings', icon: '⚙️' },
   ];
 
