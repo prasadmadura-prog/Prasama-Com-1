@@ -1,5 +1,4 @@
-
-// Audit Trail Entry for logging user actions
+﻿// Audit Trail Entry for logging user actions
 export interface AuditTrailEntry {
   id: string;
   userId: string;
@@ -102,7 +101,7 @@ export interface Transaction {
   type: 'SALE' | 'PURCHASE' | 'EXPENSE' | 'CREDIT_PAYMENT' | 'TRANSFER';
   amount: number;
   discount?: number;
-  items?: { productId: string; quantity: number; price: number; discount?: number; discountType?: 'AMT' | 'PCT' }[];
+  items?: { productId: string; quantity: number; price: number; discount?: number }[];
   description: string;
   paymentMethod: 'CASH' | 'BANK' | 'CARD' | 'CREDIT' | 'CHEQUE';
   accountId?: string;
@@ -113,8 +112,6 @@ export interface Transaction {
   chequeDate?: string;
   userId?: string;
   branchId?: string; // New: Tracking which shop location generated the record
-  cashierId?: string; // Cashier who made the transaction (e.g., 'cashier-1', 'cashier-2')
-  cashierName?: string; // Cashier display name for easy reference
 }
 
 export interface DaySession {
@@ -155,13 +152,10 @@ export interface UserProfile {
   logo?: string;
   loginUsername?: string;
   loginPassword?: string;
-  userId?: string; // Unique identifier for cashier/user
-  role?: 'ADMIN' | 'CASHIER'; // User role
-  email?: string; // User email
   isAdmin?: boolean;
 }
 
-export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'AI_ADVISOR';
+export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'AI_ADVISOR' | 'AUDIT_TRAIL';
 
 export interface POSSession {
   cart: { 

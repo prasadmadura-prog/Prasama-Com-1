@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { 
   subscribeToCollection, 
@@ -8,7 +8,25 @@ import {
   bulkUpsert,
   collections as dbCols 
 } from './services/database';
-import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation } from './types';
+import { v4 as uuidv4 } from 'uuid';
+  // --- AUDIT TRAIL LOGGING ---
+  const logAuditTrail = async (action: string, entityType: string, entityId?: string, details?: any) => {
+    const entry = {
+      id: uuidv4(),
+      userId: userProfile.loginUsername || userProfile.name || 'Unknown',
+      action,
+      entityType,
+      entityId,
+      timestamp: new Date().toISOString(),
+      details
+    };
+    try {
+      await upsertDocument('auditTrail', entry.id, entry);
+    } catch (e) {
+      // Optionally handle/log error
+    }
+  };
+import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation, AuditTrailEntry } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import POS from './components/POS';
@@ -23,7 +41,81 @@ import Quotations from './components/Quotations';
 import Settings from './components/Settings';
 import Login from './components/Login';
 import AIAdvisor from './components/AIAdvisor';
-import { v4 as uuidv4 } from 'uuid';
+
+// Lightweight inline Audit Trail view
+const AuditTrailView: React.FC<{ entries: AuditTrailEntry[]; onBack: () => void }> = ({ entries, onBack }) => {
+  const today = () => {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const [fromDate, setFromDate] = React.useState<string>(today());
+  const [toDate, setToDate] = React.useState<string>(today());
+  const setPreset = (days: number) => {
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(end.getDate() - (days - 1));
+    const fmt = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    setFromDate(fmt(start));
+    setToDate(fmt(end));
+  };
+  const inRange = (iso: string) => {
+    const dOnly = iso.slice(0, 10);
+    return dOnly >= fromDate && dOnly <= toDate;
+  };
+  const filtered = entries.filter(e => inRange(e.timestamp)).sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-800">Audit Trail</h2>
+        <button onClick={onBack} className="px-3 py-1.5 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm">Back</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-3">
+        <span className="text-sm text-slate-700">From</span>
+        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+        <span className="text-sm text-slate-700">To</span>
+        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => setPreset(1)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Today</button>
+          <button onClick={() => setPreset(7)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">7d</button>
+          <button onClick={() => setPreset(30)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">30d</button>
+        </div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-slate-700">
+              <tr>
+                <th className="px-3 py-2 text-left">Timestamp</th>
+                <th className="px-3 py-2 text-left">User</th>
+                <th className="px-3 py-2 text-left">Action</th>
+                <th className="px-3 py-2 text-left">Entity</th>
+                <th className="px-3 py-2 text-left">Entity ID</th>
+                <th className="px-3 py-2 text-left">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((e) => (
+                <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-2 whitespace-nowrap">{e.timestamp}</td>
+                  <td className="px-3 py-2">{e.userId}</td>
+                  <td className="px-3 py-2">{e.action}</td>
+                  <td className="px-3 py-2">{e.entityType}</td>
+                  <td className="px-3 py-2">{e.entityId || '-'}</td>
+                  <td className="px-3 py-2 max-w-[420px] truncate">{typeof e.details === 'object' ? JSON.stringify(e.details) : String(e.details || '')}</td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">No entries in selected range.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -48,6 +140,7 @@ const App: React.FC = () => {
   });
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [daySessions, setDaySessions] = useState<DaySession[]>([]);
+  const [auditTrail, setAuditTrail] = useState<AuditTrailEntry[]>([]);
   
   const getLocalDateString = () => {
     const d = new Date();
@@ -59,24 +152,6 @@ const App: React.FC = () => {
     const date = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
     return `${date}T${time}`;
-  };
-
-  // --- AUDIT TRAIL LOGGING ---
-  const logAuditTrail = async (action: string, entityType: string, entityId?: string, details?: any) => {
-    const entry = {
-      id: uuidv4(),
-      userId: userProfile.loginUsername || userProfile.name || 'Unknown',
-      action,
-      entityType,
-      entityId,
-      timestamp: new Date().toISOString(),
-      details
-    };
-    try {
-      await upsertDocument('auditTrail', entry.id, entry);
-    } catch (e) {
-      // Optionally handle/log error
-    }
   };
 
   const [posSession, setPosSession] = useState<POSSession>({ 
@@ -115,7 +190,9 @@ const App: React.FC = () => {
       subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])),
       subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[])),
       subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])),
-      subscribeToDocument(dbCols.profile, 'main', (data) => setUserProfile(prev => ({ ...prev, ...data })))
+      subscribeToDocument(dbCols.profile, 'main', (data) => setUserProfile(prev => ({ ...prev, ...data }))),
+      // Subscribe to audit trail entries
+      subscribeToCollection('auditTrail', (data) => setAuditTrail(data as AuditTrailEntry[]))
     ];
 
     return () => unsubscribes.forEach(unsub => unsub());
@@ -147,9 +224,7 @@ const App: React.FC = () => {
             const bStocks = { ...(product.branchStocks || {}) };
             const currentStock = bStocks[activeBranch] !== undefined ? bStocks[activeBranch] : product.stock;
             const updatedStock = Math.max(0, Number(currentStock) - Number(item.quantity));
-            
             bStocks[activeBranch] = updatedStock;
-            
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
@@ -174,14 +249,11 @@ const App: React.FC = () => {
         type: 'SALE' as const,
         date: getLocalTimestamp(),
         branchId: activeBranch,
-        cashierId: userProfile.userId, // Track which cashier made the sale
-        cashierName: userProfile.name, // Store cashier name for easy reference
         updatedAt: new Date().toISOString()
       };
-      
       await upsertDocument(dbCols.transactions, tx.id, normalizedTx);
-      await logAuditTrail('CREATE', 'Transaction', tx.id, { type: 'SALE', amount: tx.amount, branchId: activeBranch });
-      
+      await logAuditTrail('CREATE', 'Transaction', tx.id, { type: 'SALE', amount: tx.amount });
+
       const acc = accounts.find(a => a.id === normalizedTx.accountId);
       if (acc && normalizedTx.paymentMethod !== 'CREDIT') {
         await upsertDocument(dbCols.accounts, acc.id, {
@@ -190,24 +262,9 @@ const App: React.FC = () => {
         });
       }
 
-    } catch (error: any) {
+    } catch (error) {
       console.error("TRANSACTION_FAILED:", error);
-      const errorMessage = error?.message || String(error);
-      
-      // Log detailed error info
-      if (error?.code === 'permission-denied') {
-        console.error("Firebase permission denied. Check Firestore security rules.");
-        alert("Permission denied. Please check Firebase Firestore rules or contact admin.");
-      } else if (error?.code === 'failed-precondition') {
-        console.error("Failed precondition - database may be offline.");
-        alert("Database offline. Please check your connection and try again.");
-      } else if (error?.code === 'unauthenticated') {
-        console.error("Authentication required. Please login again.");
-        alert("Authentication error. Please login again.");
-      } else {
-        console.error("Full error details:", { code: error?.code, message: errorMessage, stack: error?.stack });
-        alert("A critical error occurred while saving the sale.\nError: " + errorMessage);
-      }
+      alert("A critical error occurred while saving the sale.");
     }
   };
 
@@ -255,7 +312,7 @@ const App: React.FC = () => {
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate
     });
-    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'PURCHASE', amount: po.totalAmount, branchId: activeBranch });
+    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'PURCHASE', amount: po.totalAmount });
 
     if (po.paymentMethod === 'CREDIT') {
       const vendor = vendors.find(v => v.id === po.vendorId);
@@ -366,7 +423,7 @@ const App: React.FC = () => {
   const handleCustomerPayment = async (tx: Omit<Transaction, 'id' | 'date'>) => {
     const txId = `CP-${Date.now()}`;
     await upsertDocument(dbCols.transactions, txId, { ...tx, id: txId, date: getLocalTimestamp(), branchId: userProfile.branch });
-    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'CREDIT_PAYMENT', amount: tx.amount, branchId: userProfile.branch });
+    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'CREDIT_PAYMENT', amount: tx.amount });
     if (tx.customerId) {
       const customer = customers.find(c => c.id === tx.customerId);
       if (customer) {
@@ -409,29 +466,10 @@ const App: React.FC = () => {
   const filteredTransactions = transactions.filter(t => isTargetBranch(t.branchId));
   const branchDaySession = filteredDaySessions.find(s => s.date === getLocalDateString());
 
-  // Show all products with their total stock (sum of all branches)
   const branchProducts = products.map(p => ({
     ...p,
-    stock: p.stock || 0  // Use total stock instead of branch-specific
+    stock: p.branchStocks && p.branchStocks[activeBranch] !== undefined ? p.branchStocks[activeBranch] : (activeBranch === "Bookshop" ? p.stock : 0)
   }));
-
-  // Calculate today's metrics for sidebar
-  const today = getLocalDateString();
-  const todayRevenue = transactions.filter(t => t.type === 'SALE' && t.date.split('T')[0] === today).reduce((a, b) => a + Number(b.amount || 0), 0);
-  const todayCost = transactions.filter(t => t.type === 'SALE' && t.date.split('T')[0] === today).reduce((acc, tx) => {
-    if (tx.items && Array.isArray(tx.items)) {
-      const txCost = tx.items.reduce((sum, item) => {
-        const product = products.find(p => p.id === item.productId);
-        const costPrice = product?.cost || 0;
-        return sum + (item.quantity * costPrice);
-      }, 0);
-      return acc + txCost;
-    }
-    return acc;
-  }, 0);
-  const todayProfit = todayRevenue - todayCost;
-  const cashAccount = accounts.find(a => a.id === 'cash');
-  const todayCash = cashAccount?.balance || 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 selection:bg-indigo-100 selection:text-indigo-700">
@@ -439,10 +477,7 @@ const App: React.FC = () => {
         currentView={currentView} 
         setView={setCurrentView} 
         userProfile={userProfile} 
-        accounts={accounts}
-        todayRevenue={todayRevenue}
-        todayProfit={todayProfit}
-        todayCash={todayCash}
+        accounts={accounts} 
         onEditProfile={() => setCurrentView('SETTINGS')}
         onLogout={handleLogout}
         onSwitchBranch={(b) => {
@@ -453,18 +488,25 @@ const App: React.FC = () => {
       />
       <main className="flex-1 overflow-y-auto bg-[#fcfcfc] custom-scrollbar">
         <div className="max-w-[1600px] mx-auto px-4 py-6 md:px-8 md:py-10 lg:px-12 lg:py-12">
-            {currentView === 'DASHBOARD' && <Dashboard transactions={transactions} products={products} categories={categories} accounts={accounts} vendors={vendors} customers={customers} daySessions={daySessions} purchaseOrders={purchaseOrders} onNavigate={setCurrentView} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} />}
+            {/* Quick access button to Audit Trail */}
+            {currentView !== 'AUDIT_TRAIL' && (
+              <div className="flex justify-end mb-4">
+                <button onClick={() => setCurrentView('AUDIT_TRAIL')} className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700">Audit Trail</button>
+              </div>
+            )}
+            {currentView === 'DASHBOARD' && <Dashboard transactions={filteredTransactions} products={branchProducts} accounts={accounts} vendors={vendors} customers={customers} daySessions={filteredDaySessions} purchaseOrders={purchaseOrders} onNavigate={setCurrentView} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} />}
             {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={filteredTransactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
             {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} />}
-            {currentView === 'SALES_HISTORY' && <SalesHistory transactions={transactions} products={products} customers={customers} userProfile={userProfile} accounts={accounts} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} />}
+            {currentView === 'SALES_HISTORY' && <SalesHistory transactions={filteredTransactions} products={branchProducts} customers={customers} userProfile={userProfile} accounts={accounts} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} />}
             {currentView === 'INVENTORY' && <Inventory products={products} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = {id: `cat-${Date.now()}`, name: name.toUpperCase()}; upsertDocument(dbCols.categories, c.id, c); return c; }} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
             {currentView === 'FINANCE' && <Finance accounts={accounts} transactions={filteredTransactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={(tx) => upsertDocument(dbCols.transactions, `EX-${Date.now()}`, { ...tx, date: getLocalDateString() + 'T12:00:00', branchId: activeBranch })} onAddTransfer={(tx) => upsertDocument(dbCols.transactions, `TR-${Date.now()}`, { ...tx, date: getLocalDateString() + 'T12:00:00', branchId: activeBranch })} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} />}
             {currentView === 'CUSTOMERS' && <Customers customers={customers} transactions={filteredTransactions} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onReceivePayment={handleCustomerPayment} />}
             {currentView === 'AI_ADVISOR' && <AIAdvisor transactions={filteredTransactions} products={branchProducts} vendors={vendors} accounts={accounts} userProfile={userProfile} />}
-            {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} syncStatus="IDLE" transactions={transactions} />}
+            {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} syncStatus="IDLE" />}
             {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
             {currentView === 'CHEQUE_PRINT' && <ChequePrint />}
             {currentView === 'PURCHASES' && <Purchases products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={filteredTransactions} userProfile={userProfile} onUpsertPO={(po) => upsertDocument(dbCols.purchaseOrders, po.id, po)} onReceivePO={handleReceivePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} />}
+            {currentView === 'AUDIT_TRAIL' && <AuditTrailView entries={auditTrail} onBack={() => setCurrentView('DASHBOARD')} />}
         </div>
       </main>
     </div>
