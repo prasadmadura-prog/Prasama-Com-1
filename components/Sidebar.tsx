@@ -1,5 +1,4 @@
-
-import React from 'react';
+﻿import React from 'react';
 import { View, UserProfile, BankAccount } from '../types';
 
 interface SidebarProps {
@@ -12,25 +11,24 @@ interface SidebarProps {
   todayCash?: number;
   onEditProfile: () => void;
   onLogout: () => void;
+  onSwitchBranch?: (branch: string) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, accounts, todayRevenue = 0, todayProfit = 0, todayCash = 0, onEditProfile, onLogout }) => {
-const menuItems = [
-    { id: 'DASHBOARD', label: 'Dashboard', icon: '??' },
-    { id: 'POS', label: 'POS Terminal', icon: '??' },
-    { id: 'SALES_HISTORY', label: 'Sales History', icon: '??' },
-    { id: 'QUOTATIONS', label: 'Quotations', icon: '??' },
-    { id: 'INVENTORY', label: 'Inventory', icon: '??' },
-    { id: 'PURCHASES', label: 'Purchases', icon: '???' },
-    { id: 'FINANCE', label: 'Finance', icon: '??' },
-    { id: 'CUSTOMERS', label: 'Customers', icon: '??' },
-    { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '???' },
-    { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '???' },
-    { id: 'AUDIT_TRAIL', label: 'Audit Trail', icon: '??' },
-    { id: 'SETTINGS', label: 'Settings', icon: '??' },
+  const menuItems = [
+    { id: 'DASHBOARD', label: 'Dashboard', icon: '📊' },
+    { id: 'POS', label: 'POS Terminal', icon: '🛒' },
+    { id: 'SALES_HISTORY', label: 'Sales History', icon: '📜' },
+    { id: 'QUOTATIONS', label: 'Quotations', icon: '📋' },
+    { id: 'INVENTORY', label: 'Inventory', icon: '📦' },
+    { id: 'PURCHASES', label: 'Purchases', icon: '🛍️' },
+    { id: 'FINANCE', label: 'Finance', icon: '💳' },
+    { id: 'CUSTOMERS', label: 'Customers', icon: '👥' },
+    { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '🖨️' },
+    { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '🏷️' },
+    { id: 'AUDIT_TRAIL', label: 'Audit Trail', icon: '📝' },
+    { id: 'SETTINGS', label: 'Settings', icon: '⚙️' },
   ];
-
-  
 
   const initials = userProfile.name
     .split(' ')
@@ -52,10 +50,9 @@ const menuItems = [
           </div>
         </div>
 
-        {/* Today's Metrics */}
         <div className="bg-slate-900/40 p-3 rounded-2xl border border-slate-800/50 space-y-2">
           <p className="text-[8px] font-black text-slate-500 uppercase tracking-tight mb-2">Live Liquidity</p>
-          
+
           <div className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
             <div className="text-base mb-1">💰</div>
             <p className="text-[9px] font-black font-mono text-white leading-tight">
@@ -90,8 +87,8 @@ const menuItems = [
               key={item.id}
               onClick={() => setView(item.id as View)}
               className={`w-full group flex items-center px-4 py-2.5 text-[11px] font-bold uppercase tracking-tight rounded-xl transition-all duration-200 ${
-                isActive 
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' 
+                isActive
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
                   : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-200'
               }`}
             >
@@ -105,7 +102,7 @@ const menuItems = [
       </nav>
 
       <div className="p-3 mt-auto border-t border-slate-800/30 space-y-1.5">
-        <button 
+        <button
           onClick={onEditProfile}
           className="w-full flex items-center gap-2.5 bg-slate-900/30 p-3 rounded-xl border border-slate-800/30 hover:bg-slate-800/60 transition-all text-left group"
         >
@@ -118,7 +115,7 @@ const menuItems = [
           </div>
         </button>
 
-        <button 
+        <button
           onClick={onLogout}
           className="w-full flex items-center gap-2 px-4 py-2 text-[9px] font-black uppercase tracking-tight text-slate-500 hover:text-rose-400 transition-all duration-200"
         >
@@ -130,5 +127,3 @@ const menuItems = [
 };
 
 export default Sidebar;
-
-
