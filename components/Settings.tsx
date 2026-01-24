@@ -157,7 +157,7 @@ const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExpo
                    <span className="text-sm">👤</span>
                    <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Account Information</h4>
                  </div>
-                 <div className="grid grid-cols-2 gap-4">
+                 <div className={`grid gap-4 ${userProfile.userId && userProfile.role ? 'grid-cols-2' : 'grid-cols-1'}`}>
                    {userProfile.userId && (
                      <div>
                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">User ID</label>
