@@ -135,10 +135,13 @@ export interface BankAccount {
 }
 
 export interface UserProfile {
+  userId?: string;
   name: string;
   branch: string; // This is the "Current Active Branch"
   allBranches?: string[]; // List of available shop locations
   phone?: string;
+  email?: string;
+  role?: string;
   logo?: string;
   loginUsername?: string;
   loginPassword?: string;

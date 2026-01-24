@@ -44,6 +44,7 @@ const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExpo
       name: fd.get('name') as string,
       branch: fd.get('branch') as string,
       phone: fd.get('phone') as string,
+      email: fd.get('email') as string,
       loginUsername: (fd.get('loginUsername') as string).toUpperCase(),
       loginPassword: fd.get('loginPassword') as string,
     };
@@ -126,6 +127,10 @@ const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExpo
                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Contact Line</label>
                    <input name="phone" className="w-full px-5 py-3 rounded-2xl border border-slate-200 font-bold outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" defaultValue={userProfile.phone || ""} placeholder="+94 ..." />
                  </div>
+                 <div className="space-y-1">
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                   <input name="email" type="email" className="w-full px-5 py-3 rounded-2xl border border-slate-200 font-bold outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all" defaultValue={userProfile.email || ""} placeholder="admin@company.com" />
+                 </div>
               </div>
             </div>
 
@@ -145,6 +150,33 @@ const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExpo
                  </div>
                </div>
             </div>
+
+            {(userProfile.userId || userProfile.role) && (
+              <div className="pt-6 border-t border-slate-100 space-y-4">
+                 <div className="flex items-center gap-3 mb-2">
+                   <span className="text-sm">👤</span>
+                   <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Account Information</h4>
+                 </div>
+                 <div className="grid grid-cols-2 gap-4">
+                   {userProfile.userId && (
+                     <div>
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">User ID</label>
+                       <div className="w-full px-5 py-3 rounded-2xl border border-slate-200 bg-slate-50 font-black text-slate-600 uppercase text-xs">
+                         {userProfile.userId}
+                       </div>
+                     </div>
+                   )}
+                   {userProfile.role && (
+                     <div>
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">Role</label>
+                       <div className="w-full px-5 py-3 rounded-2xl border border-slate-200 bg-slate-50 font-black text-slate-600 uppercase text-xs">
+                         {userProfile.role}
+                       </div>
+                     </div>
+                   )}
+                 </div>
+              </div>
+            )}
 
             <button type="submit" className="w-full bg-slate-950 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black transition-all active:scale-95 shadow-slate-200">Sync Global Modifications</button>
           </form>
