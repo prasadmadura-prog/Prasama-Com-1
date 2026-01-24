@@ -28,14 +28,13 @@ const Dashboard: React.FC<DashboardProps> = ({
   onNavigate
 }) => {
   const stats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    
-    const todaySalesTotal = transactions
-      .filter(t => t.type === 'SALE' && t.date.split('T')[0] === today)
+    // Calculate ALL-TIME sales metrics (not just today)
+    const allSalesTotal = transactions
+      .filter(t => t.type === 'SALE')
       .reduce((acc, t) => acc + Number(t.amount), 0);
-    
-    const todayCostOfRevenue = transactions
-      .filter(t => t.type === 'SALE' && t.date.split('T')[0] === today)
+
+    const allCostOfRevenue = transactions
+      .filter(t => t.type === 'SALE')
       .reduce((acc, t) => {
         const itemsCost = t.items?.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
@@ -44,17 +43,16 @@ const Dashboard: React.FC<DashboardProps> = ({
         return acc + itemsCost;
       }, 0);
 
-    const todayProfit = todaySalesTotal - todayCostOfRevenue;
-    const todayMargin = todaySalesTotal > 0 ? (todayProfit / todaySalesTotal) * 100 : 0;
-
+    const todayProfit = allSalesTotal - allCostOfRevenue;
+    const todayMargin = allSalesTotal > 0 ? (todayProfit / allSalesTotal) * 100 : 0;
+// All-time realized outflow (expenses, purchases, transfers)
     const realizedOutflow = transactions
-      .filter(t => t.date.split('T')[0] === today && 
-                  (t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId)))
+      .filter(t => t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId))
       .reduce((acc, t) => acc + Number(t.amount), 0);
 
     const stockValuation = products.reduce((acc, p) => acc + (Number(p.cost) * Number(p.stock)), 0);
     
-    return { todaySalesTotal, todayCostOfRevenue, todayProfit, todayMargin, realizedOutflow, stockValuation };
+    return { todaySalesTotal: allSalesTotal, todayCostOfRevenue: allCostOfRevenue, todayProfit, todayMargin, realizedOutflow, stockValuation };
   }, [transactions, products]);
 
   const upcomingFinancials = useMemo(() => {

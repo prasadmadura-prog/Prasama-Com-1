@@ -31,18 +31,10 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const today = getTodayLocal();
 
-  // Helper: Default to last 30 days instead of today only
-  const getDefaultFromDate = () => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  };
-
-  const defaultStart = getDefaultFromDate();
-
+  // Default to showing all data (no date restriction) - optional date filtering only
   const [searchTerm, setSearchTerm] = useState('');
-  const [startDate, setStartDate] = useState(defaultStart);
-  const [endDate, setEndDate] = useState(today);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [activeTab, setActiveTab] = useState<'ALL' | 'PAID' | 'DUE' | 'DRAFT'>('ALL');
   const [selectedCashier, setSelectedCashier] = useState<string>('ALL'); // Filter by cashier
   
@@ -145,8 +137,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const resetFilters = () => {
     setSearchTerm('');
-    setStartDate(defaultStart);
-    setEndDate(today);
+    setStartDate('');
+    setEndDate('');
     setActiveTab('ALL');
   };
 
@@ -363,7 +355,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           <option value="cashier-1">Cashier 1</option>
           <option value="cashier-2">Cashier 2</option>
         </select>
-        <button onClick={resetFilters} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Reset to Last 30 Days">↺ 30d</button>
+        <button onClick={resetFilters} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Show All Data">↺ All</button>
         <button onClick={showAllHistory} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-white text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Show full history">∞ All</button>
         <div className="flex gap-1 ml-2">
           {[
