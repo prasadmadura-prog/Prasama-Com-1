@@ -1,4 +1,4 @@
-
+﻿
 import React from 'react';
 import { View, UserProfile, BankAccount } from '../types';
 
@@ -15,22 +15,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, userProfile, accounts, todayRevenue = 0, todayProfit = 0, todayCash = 0, onEditProfile, onLogout }) => {
-const menuItems = [
-    { id: 'DASHBOARD', label: 'Dashboard', icon: '??' },
-    { id: 'POS', label: 'POS Terminal', icon: '??' },
-    { id: 'SALES_HISTORY', label: 'Sales History', icon: '??' },
-    { id: 'QUOTATIONS', label: 'Quotations', icon: '??' },
-    { id: 'INVENTORY', label: 'Inventory', icon: '??' },
-    { id: 'PURCHASES', label: 'Purchases', icon: '???' },
-    { id: 'FINANCE', label: 'Finance', icon: '??' },
-    { id: 'CUSTOMERS', label: 'Customers', icon: '??' },
-    { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '???' },
-    { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '???' },
-    { id: 'AUDIT_TRAIL', label: 'Audit Trail', icon: '??' },
-    { id: 'SETTINGS', label: 'Settings', icon: '??' },
-  ];
-
-  
+  ;
 
   const initials = userProfile.name
     .split(' ')
@@ -57,7 +42,7 @@ const menuItems = [
           <p className="text-[8px] font-black text-slate-500 uppercase tracking-tight mb-2">Live Liquidity</p>
           
           <div className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
-            <div className="text-base mb-1">💰</div>
+            <div className="text-base mb-1">ðŸ’°</div>
             <p className="text-[9px] font-black font-mono text-white leading-tight">
               {Number(todayRevenue).toLocaleString(undefined, { minimumFractionDigits: 0 })}
             </p>
@@ -65,7 +50,7 @@ const menuItems = [
           </div>
 
           <div className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
-            <div className="text-base mb-1">📈</div>
+            <div className="text-base mb-1">ðŸ“ˆ</div>
             <p className="text-[9px] font-black font-mono text-emerald-400 leading-tight">
               {Number(todayProfit).toLocaleString(undefined, { minimumFractionDigits: 0 })}
             </p>
@@ -73,7 +58,7 @@ const menuItems = [
           </div>
 
           <div className="bg-slate-800/40 p-2 rounded-lg border border-slate-700/30">
-            <div className="text-base mb-1">💵</div>
+            <div className="text-base mb-1">ðŸ’µ</div>
             <p className="text-[9px] font-black font-mono text-indigo-400 leading-tight">
               {Number(todayCash).toLocaleString(undefined, { minimumFractionDigits: 0 })}
             </p>
@@ -122,7 +107,7 @@ const menuItems = [
           onClick={onLogout}
           className="w-full flex items-center gap-2 px-4 py-2 text-[9px] font-black uppercase tracking-tight text-slate-500 hover:text-rose-400 transition-all duration-200"
         >
-          <span>🚪</span> Exit Terminal
+          <span>ðŸšª</span> Exit Terminal
         </button>
       </div>
     </div>
@@ -130,5 +115,4 @@ const menuItems = [
 };
 
 export default Sidebar;
-
 
