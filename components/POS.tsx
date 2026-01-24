@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, Transaction, Customer, Category, UserProfile, DaySession, BankAccount, POSSession } from '../types';
 import { buildSaleReceiptHtml } from './ReceiptLayout';
@@ -101,7 +101,7 @@ const POS: React.FC<POSProps> = ({
   };
 
   // --- Audit Trail State ---
-  const [fromDate, setFromDate] = useState(today);
+  const getDefaultFromDate = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0]; }; const [fromDate, setFromDate] = useState(getDefaultFromDate());
   const [toDate, setToDate] = useState(today);
   const [protocolFilter, setProtocolFilter] = useState<string[]>([]);
   const allProtocols = useMemo(() => {
@@ -484,3 +484,4 @@ const POS: React.FC<POSProps> = ({
 }; 
 
 export default POS;
+

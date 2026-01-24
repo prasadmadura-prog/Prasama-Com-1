@@ -27,8 +27,13 @@ const Finance: React.FC<FinanceProps> = ({
   onAddRecurring, onDeleteRecurring, onUpsertAccount
 }) => {
    const today = new Date().toISOString().split('T')[0];
-   // Date range state for audit trail
-   const [fromDate, setFromDate] = useState(today);
+    // Date range state for audit trail - default to show last 30 days
+   const getDefaultFromDate = () => {
+     const d = new Date();
+     d.setDate(d.getDate() - 30);
+     return d.toISOString().split('T')[0];
+   };
+   const [fromDate, setFromDate] = useState(getDefaultFromDate());
    const [toDate, setToDate] = useState(today);
    const currentSession = daySessions.find(s => s.date === today);
    // Protocol filter state (multi-select)
