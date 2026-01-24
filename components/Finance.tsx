@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useMemo } from 'react';
 import { Transaction, Product, BankAccount, Vendor, UserProfile, DaySession, RecurringExpense } from '../types';
 
@@ -159,6 +159,7 @@ const Finance: React.FC<FinanceProps> = ({
            <button onClick={() => setShowAccountsModal(true)} className="bg-white border border-slate-200 text-slate-900 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm">Manage Accounts</button>
            <button onClick={() => setShowTransferModal(true)} className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-xl">Internal Transfer</button>
            <button onClick={() => setShowExpenseModal(true)} className="bg-rose-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-200">Record Expense</button>
+           <button onClick={() => setShowRecurringModal(true)} className="bg-[#001f3f] text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-[#003366] transition-all shadow-xl">Scheduled Events</button>
            
            <div className="w-px h-10 bg-slate-200 mx-2 hidden md:block"></div>
 
@@ -263,10 +264,10 @@ const Finance: React.FC<FinanceProps> = ({
                             </td>
                             <td className="px-10 py-5">
                                 <div className="flex items-center gap-2">
-                                   <span className="text-[12px]">{t.accountId === 'cash' ? '💵' : '🏦'}</span>
+                                   <span className="text-[12px]">{t.accountId === 'cash' ? 'ðŸ’µ' : 'ðŸ¦'}</span>
                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
                                       {accounts.find(a => a.id === t.accountId)?.name || 'Direct'}
-                                      {t.destinationAccountId && ` ➔ ${accounts.find(a => a.id === t.destinationAccountId)?.name}`}
+                                      {t.destinationAccountId && ` âž” ${accounts.find(a => a.id === t.destinationAccountId)?.name}`}
                                    </p>
                                 </div>
                             </td>
@@ -276,14 +277,14 @@ const Finance: React.FC<FinanceProps> = ({
                                   ? 'text-slate-900' 
                                   : 'text-rose-600'
                                 }`}>
-                                   {t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' ? '+' : t.type === 'TRANSFER' ? '•' : '-'} Rs. {Number(t.amount).toLocaleString()}
+                                   {t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' ? '+' : t.type === 'TRANSFER' ? 'â€¢' : '-'} Rs. {Number(t.amount).toLocaleString()}
                                 </p>
                             </td>
                         </tr>
                     )) : (
                       <tr>
                         <td colSpan={4} className="px-10 py-32 text-center">
-                           <div className="opacity-10 text-6xl mb-4 grayscale">💰</div>
+                           <div className="opacity-10 text-6xl mb-4 grayscale">ðŸ’°</div>
                            <p className="text-slate-300 font-black uppercase tracking-[0.4em] text-[10px]">Zero commercial activity recorded for this period</p>
                         </td>
                       </tr>
@@ -411,8 +412,57 @@ const Finance: React.FC<FinanceProps> = ({
            </div>
         </div>
       )}
+      {/* Scheduled Events Modal */}
+      {showRecurringModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl" onClick={(e) => { if(e.target === e.currentTarget) setShowRecurringModal(false); }}>
+           <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden animate-in zoom-in duration-300 flex flex-col">
+              <div className="p-10 border-b border-slate-100 bg-[#001f3f] flex justify-between items-center shrink-0">
+                 <div>
+                    <h3 className="text-3xl font-black text-white uppercase tracking-tighter">Scheduled Events</h3>
+                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mt-1">Recurring Financial Obligations</p>
+                 </div>
+                 <button onClick={() => setShowRecurringModal(false)} className="text-indigo-300 hover:text-white text-5xl leading-none">&times;</button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-12 custom-scrollbar">
+                 <div className="space-y-4">
+                    <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-b border-slate-100 pb-2">Active Recurring Expenses</h4>
+                    {recurringExpenses.length === 0 ? (
+                      <div className="p-12 text-center">
+                        <div className="text-6xl mb-4 opacity-20">📅</div>
+                        <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No scheduled events configured</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {recurringExpenses.map(re => (
+                          <div key={re.id} className="p-6 bg-[#f0f4f8] rounded-3xl border border-[#001f3f]/10 flex justify-between items-center group hover:border-[#001f3f]/30 transition-all">
+                            <div className="flex-1">
+                              <p className="text-sm font-black text-[#001f3f] uppercase tracking-tight">{re.description}</p>
+                              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                                {re.frequency} • Next: {re.nextDue}
+                              </p>
+                            </div>
+                            <div className="text-right flex items-center gap-4">
+                              <div>
+                                <p className="text-xl font-black font-mono text-[#001f3f] tracking-tighter">Rs. {re.amount.toLocaleString()}</p>
+                                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Per {re.frequency}</p>
+                              </div>
+                              <button onClick={() => onDeleteRecurring(re.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-rose-500 hover:text-rose-700 text-2xl">×</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
     </div>
   );
 };
 
 export default Finance;
+
+
