@@ -471,13 +471,46 @@ const App: React.FC = () => {
     stock: p.branchStocks && p.branchStocks[activeBranch] !== undefined ? p.branchStocks[activeBranch] : (activeBranch === "Bookshop" ? p.stock : 0)
   }));
 
+  // Calculate today's metrics for Sidebar
+  const todayDate = getLocalDateString();
+  const todayTransactions = filteredTransactions.filter(t => {
+    const txDate = t.date ? t.date.split('T')[0] : '';
+    return txDate === todayDate;
+  });
+
+  const todayRevenue = todayTransactions
+    .filter(t => t.type && t.type.toUpperCase() === 'SALE')
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+  const todayCostOfRevenue = todayTransactions
+    .filter(t => t.type && t.type.toUpperCase() === 'SALE')
+    .reduce((sum, t) => {
+      const itemsCost = (t.items || []).reduce((itemSum, item) => {
+        const product = products.find(p => p.id === item.productId);
+        return itemSum + (Number(product?.cost || 0) * Number(item.quantity || 0));
+      }, 0);
+      return sum + itemsCost;
+    }, 0);
+
+  const todayProfit = todayRevenue - todayCostOfRevenue;
+
+  const todayCash = todayTransactions
+    .filter(t => {
+      const txType = t.type ? t.type.toUpperCase() : '';
+      return (txType === 'SALE' && t.paymentMethod === 'CASH') || txType === 'CREDIT_PAYMENT';
+    })
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 selection:bg-indigo-100 selection:text-indigo-700">
       <Sidebar 
         currentView={currentView} 
         setView={setCurrentView} 
         userProfile={userProfile} 
-        accounts={accounts} 
+        accounts={accounts}
+        todayRevenue={todayRevenue}
+        todayProfit={todayProfit}
+        todayCash={todayCash}
         onEditProfile={() => setCurrentView('SETTINGS')}
         onLogout={handleLogout}
         onSwitchBranch={(b) => {
