@@ -16,10 +16,12 @@
     "jsbarcode": "3.11.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "recharts": "2.15.0"
+    "recharts": "2.15.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/uuid": "^9.0.8",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

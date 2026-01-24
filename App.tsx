@@ -23,6 +23,7 @@ import Quotations from './components/Quotations';
 import Settings from './components/Settings';
 import Login from './components/Login';
 import AIAdvisor from './components/AIAdvisor';
+import { v4 as uuidv4 } from 'uuid';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -58,6 +59,24 @@ const App: React.FC = () => {
     const date = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
     return `${date}T${time}`;
+  };
+
+  // --- AUDIT TRAIL LOGGING ---
+  const logAuditTrail = async (action: string, entityType: string, entityId?: string, details?: any) => {
+    const entry = {
+      id: uuidv4(),
+      userId: userProfile.loginUsername || userProfile.name || 'Unknown',
+      action,
+      entityType,
+      entityId,
+      timestamp: new Date().toISOString(),
+      details
+    };
+    try {
+      await upsertDocument('auditTrail', entry.id, entry);
+    } catch (e) {
+      // Optionally handle/log error
+    }
   };
 
   const [posSession, setPosSession] = useState<POSSession>({ 
@@ -155,10 +174,13 @@ const App: React.FC = () => {
         type: 'SALE' as const,
         date: getLocalTimestamp(),
         branchId: activeBranch,
+        cashierId: userProfile.userId, // Track which cashier made the sale
+        cashierName: userProfile.name, // Store cashier name for easy reference
         updatedAt: new Date().toISOString()
       };
       
       await upsertDocument(dbCols.transactions, tx.id, normalizedTx);
+      await logAuditTrail('CREATE', 'Transaction', tx.id, { type: 'SALE', amount: tx.amount, branchId: activeBranch });
       
       const acc = accounts.find(a => a.id === normalizedTx.accountId);
       if (acc && normalizedTx.paymentMethod !== 'CREDIT') {
@@ -168,9 +190,24 @@ const App: React.FC = () => {
         });
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("TRANSACTION_FAILED:", error);
-      alert("A critical error occurred while saving the sale.");
+      const errorMessage = error?.message || String(error);
+      
+      // Log detailed error info
+      if (error?.code === 'permission-denied') {
+        console.error("Firebase permission denied. Check Firestore security rules.");
+        alert("Permission denied. Please check Firebase Firestore rules or contact admin.");
+      } else if (error?.code === 'failed-precondition') {
+        console.error("Failed precondition - database may be offline.");
+        alert("Database offline. Please check your connection and try again.");
+      } else if (error?.code === 'unauthenticated') {
+        console.error("Authentication required. Please login again.");
+        alert("Authentication error. Please login again.");
+      } else {
+        console.error("Full error details:", { code: error?.code, message: errorMessage, stack: error?.stack });
+        alert("A critical error occurred while saving the sale.\nError: " + errorMessage);
+      }
     }
   };
 
@@ -184,6 +221,7 @@ const App: React.FC = () => {
       receivedDate: new Date().toISOString() 
     };
     await upsertDocument(dbCols.purchaseOrders, po.id, updatedPO);
+    await logAuditTrail('UPDATE', 'PurchaseOrder', po.id, { status: 'RECEIVED' });
 
     const activeBranch = userProfile.branch;
 
@@ -217,6 +255,7 @@ const App: React.FC = () => {
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate
     });
+    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'PURCHASE', amount: po.totalAmount, branchId: activeBranch });
 
     if (po.paymentMethod === 'CREDIT') {
       const vendor = vendors.find(v => v.id === po.vendorId);
@@ -327,6 +366,7 @@ const App: React.FC = () => {
   const handleCustomerPayment = async (tx: Omit<Transaction, 'id' | 'date'>) => {
     const txId = `CP-${Date.now()}`;
     await upsertDocument(dbCols.transactions, txId, { ...tx, id: txId, date: getLocalTimestamp(), branchId: userProfile.branch });
+    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'CREDIT_PAYMENT', amount: tx.amount, branchId: userProfile.branch });
     if (tx.customerId) {
       const customer = customers.find(c => c.id === tx.customerId);
       if (customer) {
@@ -369,10 +409,29 @@ const App: React.FC = () => {
   const filteredTransactions = transactions.filter(t => isTargetBranch(t.branchId));
   const branchDaySession = filteredDaySessions.find(s => s.date === getLocalDateString());
 
+  // Show all products with their total stock (sum of all branches)
   const branchProducts = products.map(p => ({
     ...p,
-    stock: p.branchStocks && p.branchStocks[activeBranch] !== undefined ? p.branchStocks[activeBranch] : (activeBranch === "Bookshop" ? p.stock : 0)
+    stock: p.stock || 0  // Use total stock instead of branch-specific
   }));
+
+  // Calculate today's metrics for sidebar
+  const today = getLocalDateString();
+  const todayRevenue = transactions.filter(t => t.type === 'SALE' && t.date.split('T')[0] === today).reduce((a, b) => a + Number(b.amount || 0), 0);
+  const todayCost = transactions.filter(t => t.type === 'SALE' && t.date.split('T')[0] === today).reduce((acc, tx) => {
+    if (tx.items && Array.isArray(tx.items)) {
+      const txCost = tx.items.reduce((sum, item) => {
+        const product = products.find(p => p.id === item.productId);
+        const costPrice = product?.cost || 0;
+        return sum + (item.quantity * costPrice);
+      }, 0);
+      return acc + txCost;
+    }
+    return acc;
+  }, 0);
+  const todayProfit = todayRevenue - todayCost;
+  const cashAccount = accounts.find(a => a.id === 'cash');
+  const todayCash = cashAccount?.balance || 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 selection:bg-indigo-100 selection:text-indigo-700">
@@ -380,7 +439,10 @@ const App: React.FC = () => {
         currentView={currentView} 
         setView={setCurrentView} 
         userProfile={userProfile} 
-        accounts={accounts} 
+        accounts={accounts}
+        todayRevenue={todayRevenue}
+        todayProfit={todayProfit}
+        todayCash={todayCash}
         onEditProfile={() => setCurrentView('SETTINGS')}
         onLogout={handleLogout}
         onSwitchBranch={(b) => {
@@ -391,15 +453,15 @@ const App: React.FC = () => {
       />
       <main className="flex-1 overflow-y-auto bg-[#fcfcfc] custom-scrollbar">
         <div className="max-w-[1600px] mx-auto px-4 py-6 md:px-8 md:py-10 lg:px-12 lg:py-12">
-            {currentView === 'DASHBOARD' && <Dashboard transactions={filteredTransactions} products={branchProducts} accounts={accounts} vendors={vendors} customers={customers} daySessions={filteredDaySessions} purchaseOrders={purchaseOrders} onNavigate={setCurrentView} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} />}
+            {currentView === 'DASHBOARD' && <Dashboard transactions={transactions} products={products} categories={categories} accounts={accounts} vendors={vendors} customers={customers} daySessions={daySessions} purchaseOrders={purchaseOrders} onNavigate={setCurrentView} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} />}
             {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={filteredTransactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
             {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} />}
-            {currentView === 'SALES_HISTORY' && <SalesHistory transactions={filteredTransactions} products={branchProducts} customers={customers} userProfile={userProfile} accounts={accounts} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} />}
+            {currentView === 'SALES_HISTORY' && <SalesHistory transactions={transactions} products={products} customers={customers} userProfile={userProfile} accounts={accounts} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} />}
             {currentView === 'INVENTORY' && <Inventory products={products} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = {id: `cat-${Date.now()}`, name: name.toUpperCase()}; upsertDocument(dbCols.categories, c.id, c); return c; }} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
             {currentView === 'FINANCE' && <Finance accounts={accounts} transactions={filteredTransactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={(tx) => upsertDocument(dbCols.transactions, `EX-${Date.now()}`, { ...tx, date: getLocalDateString() + 'T12:00:00', branchId: activeBranch })} onAddTransfer={(tx) => upsertDocument(dbCols.transactions, `TR-${Date.now()}`, { ...tx, date: getLocalDateString() + 'T12:00:00', branchId: activeBranch })} onUpdateTransaction={(tx) => upsertDocument(dbCols.transactions, tx.id, tx)} onDeleteTransaction={(id) => deleteDocument(dbCols.transactions, id)} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} />}
             {currentView === 'CUSTOMERS' && <Customers customers={customers} transactions={filteredTransactions} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onReceivePayment={handleCustomerPayment} />}
             {currentView === 'AI_ADVISOR' && <AIAdvisor transactions={filteredTransactions} products={branchProducts} vendors={vendors} accounts={accounts} userProfile={userProfile} />}
-            {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} syncStatus="IDLE" />}
+            {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} syncStatus="IDLE" transactions={transactions} />}
             {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
             {currentView === 'CHEQUE_PRINT' && <ChequePrint />}
             {currentView === 'PURCHASES' && <Purchases products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={filteredTransactions} userProfile={userProfile} onUpsertPO={(po) => upsertDocument(dbCols.purchaseOrders, po.id, po)} onReceivePO={handleReceivePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} />}
