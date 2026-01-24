@@ -9,24 +9,7 @@ import {
   collections as dbCols 
 } from './services/database';
 import { v4 as uuidv4 } from 'uuid';
-  // --- AUDIT TRAIL LOGGING ---
-  const logAuditTrail = async (action: string, entityType: string, entityId?: string, details?: any) => {
-    const entry = {
-      id: uuidv4(),
-      userId: userProfile.loginUsername || userProfile.name || 'Unknown',
-      action,
-      entityType,
-      entityId,
-      timestamp: new Date().toISOString(),
-      details
-    };
-    try {
-      await upsertDocument('auditTrail', entry.id, entry);
-    } catch (e) {
-      // Optionally handle/log error
-    }
-  };
-import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation, AuditTrailEntry } from './types';
+import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import POS from './components/POS';
@@ -41,81 +24,6 @@ import Quotations from './components/Quotations';
 import Settings from './components/Settings';
 import Login from './components/Login';
 import AIAdvisor from './components/AIAdvisor';
-
-// Lightweight inline Audit Trail view
-const AuditTrailView: React.FC<{ entries: AuditTrailEntry[]; onBack: () => void }> = ({ entries, onBack }) => {
-  const today = () => {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  };
-  const [fromDate, setFromDate] = React.useState<string>(today());
-  const [toDate, setToDate] = React.useState<string>(today());
-  const setPreset = (days: number) => {
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - (days - 1));
-    const fmt = (d: Date) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    setFromDate(fmt(start));
-    setToDate(fmt(end));
-  };
-  const inRange = (iso: string) => {
-    const dOnly = iso.slice(0, 10);
-    return dOnly >= fromDate && dOnly <= toDate;
-  };
-  const filtered = entries.filter(e => inRange(e.timestamp)).sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">Audit Trail</h2>
-        <button onClick={onBack} className="px-3 py-1.5 rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm">Back</button>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg p-3">
-        <span className="text-sm text-slate-700">From</span>
-        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-        <span className="text-sm text-slate-700">To</span>
-        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-        <div className="ml-auto flex gap-2">
-          <button onClick={() => setPreset(1)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Today</button>
-          <button onClick={() => setPreset(7)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">7d</button>
-          <button onClick={() => setPreset(30)} className="px-2 py-1 text-xs rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100">30d</button>
-        </div>
-      </div>
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-slate-700">
-              <tr>
-                <th className="px-3 py-2 text-left">Timestamp</th>
-                <th className="px-3 py-2 text-left">User</th>
-                <th className="px-3 py-2 text-left">Action</th>
-                <th className="px-3 py-2 text-left">Entity</th>
-                <th className="px-3 py-2 text-left">Entity ID</th>
-                <th className="px-3 py-2 text-left">Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((e) => (
-                <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2 whitespace-nowrap">{e.timestamp}</td>
-                  <td className="px-3 py-2">{e.userId}</td>
-                  <td className="px-3 py-2">{e.action}</td>
-                  <td className="px-3 py-2">{e.entityType}</td>
-                  <td className="px-3 py-2">{e.entityId || '-'}</td>
-                  <td className="px-3 py-2 max-w-[420px] truncate">{typeof e.details === 'object' ? JSON.stringify(e.details) : String(e.details || '')}</td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">No entries in selected range.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -140,7 +48,6 @@ const App: React.FC = () => {
   });
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [daySessions, setDaySessions] = useState<DaySession[]>([]);
-  const [auditTrail, setAuditTrail] = useState<AuditTrailEntry[]>([]);
   
   const getLocalDateString = () => {
     const d = new Date();
@@ -190,9 +97,7 @@ const App: React.FC = () => {
       subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])),
       subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[])),
       subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])),
-      subscribeToDocument(dbCols.profile, 'main', (data) => setUserProfile(prev => ({ ...prev, ...data }))),
-      // Subscribe to audit trail entries
-      subscribeToCollection('auditTrail', (data) => setAuditTrail(data as AuditTrailEntry[]))
+      subscribeToDocument(dbCols.profile, 'main', (data) => setUserProfile(prev => ({ ...prev, ...data })))
     ];
 
     return () => unsubscribes.forEach(unsub => unsub());
@@ -521,12 +426,6 @@ const App: React.FC = () => {
       />
       <main className="flex-1 overflow-y-auto bg-[#fcfcfc] custom-scrollbar">
         <div className="max-w-[1600px] mx-auto px-4 py-6 md:px-8 md:py-10 lg:px-12 lg:py-12">
-            {/* Quick access button to Audit Trail */}
-            {currentView !== 'AUDIT_TRAIL' && (
-              <div className="flex justify-end mb-4">
-                <button onClick={() => setCurrentView('AUDIT_TRAIL')} className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700">Audit Trail</button>
-              </div>
-            )}
             {currentView === 'DASHBOARD' && <Dashboard transactions={filteredTransactions} products={branchProducts} accounts={accounts} vendors={vendors} customers={customers} daySessions={filteredDaySessions} purchaseOrders={purchaseOrders} onNavigate={setCurrentView} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} />}
             {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={filteredTransactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
             {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} />}
@@ -539,7 +438,6 @@ const App: React.FC = () => {
             {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
             {currentView === 'CHEQUE_PRINT' && <ChequePrint />}
             {currentView === 'PURCHASES' && <Purchases products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={filteredTransactions} userProfile={userProfile} onUpsertPO={(po) => upsertDocument(dbCols.purchaseOrders, po.id, po)} onReceivePO={handleReceivePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} />}
-            {currentView === 'AUDIT_TRAIL' && <AuditTrailView entries={auditTrail} onBack={() => setCurrentView('DASHBOARD')} />}
         </div>
       </main>
     </div>

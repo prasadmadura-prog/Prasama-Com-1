@@ -1,15 +1,4 @@
-﻿// Audit Trail Entry for logging user actions
-export interface AuditTrailEntry {
-  id: string;
-  userId: string;
-  action: string; // e.g., 'CREATE', 'UPDATE', 'DELETE', 'LOGIN', etc.
-  entityType: string; // e.g., 'Product', 'Transaction', etc.
-  entityId?: string;
-  timestamp: string; // ISO string
-  details?: any; // Optional: extra info about the action
-}
-
-export interface Product {
+﻿export interface Product {
   id: string;
   name: string;
   sku: string;
@@ -155,7 +144,7 @@ export interface UserProfile {
   isAdmin?: boolean;
 }
 
-export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'AI_ADVISOR' | 'AUDIT_TRAIL';
+export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'AI_ADVISOR';
 
 export interface POSSession {
   cart: { 
