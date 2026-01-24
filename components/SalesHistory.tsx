@@ -91,7 +91,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     console.log('SalesHistory - Total transactions received:', transactions.length);
     console.log('SalesHistory - All transactions:', transactions);
     // Remove branch filtering - show all transactions regardless of branch
-    const filtered = transactions.filter(t => t && (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || t.type === 'sale'));
+    const filtered = transactions.filter(t => {
+      if (!t || !t.type) return false;
+      const txType = t.type.toUpperCase();
+      return txType === 'SALE' || txType === 'CREDIT_PAYMENT';
+    });
     console.log('SalesHistory - Filtered SALE transactions:', filtered.length, filtered);
     return filtered;
   }, [transactions]);
@@ -166,12 +170,12 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     // Calculate Total Revenue (all sales)
     const revenue = rangeEntries
-      .filter(s => s.type === 'SALE' || s.type === 'sale')
+      .filter(s => s.type && s.type.toUpperCase() === 'SALE')
       .reduce((a, b) => a + Number(b.amount || 0), 0);
 
     // Calculate Total Cost (sum of item quantities * cost price)
     const totalCost = rangeEntries
-      .filter(s => s.type === 'SALE' || s.type === 'sale')
+      .filter(s => s.type && s.type.toUpperCase() === 'SALE')
       .reduce((acc, tx) => {
         if (tx.items && Array.isArray(tx.items)) {
           const txCost = tx.items.reduce((sum, item) => {
