@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { 
   subscribeToCollection, 
@@ -8,7 +8,6 @@ import {
   bulkUpsert,
   collections as dbCols 
 } from './services/database';
-import { v4 as uuidv4 } from 'uuid';
 import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -129,7 +128,9 @@ const App: React.FC = () => {
             const bStocks = { ...(product.branchStocks || {}) };
             const currentStock = bStocks[activeBranch] !== undefined ? bStocks[activeBranch] : product.stock;
             const updatedStock = Math.max(0, Number(currentStock) - Number(item.quantity));
+            
             bStocks[activeBranch] = updatedStock;
+            
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
@@ -156,9 +157,9 @@ const App: React.FC = () => {
         branchId: activeBranch,
         updatedAt: new Date().toISOString()
       };
+      
       await upsertDocument(dbCols.transactions, tx.id, normalizedTx);
-      await logAuditTrail('CREATE', 'Transaction', tx.id, { type: 'SALE', amount: tx.amount });
-
+      
       const acc = accounts.find(a => a.id === normalizedTx.accountId);
       if (acc && normalizedTx.paymentMethod !== 'CREDIT') {
         await upsertDocument(dbCols.accounts, acc.id, {
@@ -183,7 +184,6 @@ const App: React.FC = () => {
       receivedDate: new Date().toISOString() 
     };
     await upsertDocument(dbCols.purchaseOrders, po.id, updatedPO);
-    await logAuditTrail('UPDATE', 'PurchaseOrder', po.id, { status: 'RECEIVED' });
 
     const activeBranch = userProfile.branch;
 
@@ -217,7 +217,6 @@ const App: React.FC = () => {
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate
     });
-    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'PURCHASE', amount: po.totalAmount });
 
     if (po.paymentMethod === 'CREDIT') {
       const vendor = vendors.find(v => v.id === po.vendorId);
@@ -328,7 +327,6 @@ const App: React.FC = () => {
   const handleCustomerPayment = async (tx: Omit<Transaction, 'id' | 'date'>) => {
     const txId = `CP-${Date.now()}`;
     await upsertDocument(dbCols.transactions, txId, { ...tx, id: txId, date: getLocalTimestamp(), branchId: userProfile.branch });
-    await logAuditTrail('CREATE', 'Transaction', txId, { type: 'CREDIT_PAYMENT', amount: tx.amount });
     if (tx.customerId) {
       const customer = customers.find(c => c.id === tx.customerId);
       if (customer) {
@@ -376,46 +374,13 @@ const App: React.FC = () => {
     stock: p.branchStocks && p.branchStocks[activeBranch] !== undefined ? p.branchStocks[activeBranch] : (activeBranch === "Bookshop" ? p.stock : 0)
   }));
 
-  // Calculate today's metrics for Sidebar
-  const todayDate = getLocalDateString();
-  const todayTransactions = filteredTransactions.filter(t => {
-    const txDate = t.date ? t.date.split('T')[0] : '';
-    return txDate === todayDate;
-  });
-
-  const todayRevenue = todayTransactions
-    .filter(t => t.type && t.type.toUpperCase() === 'SALE')
-    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
-  const todayCostOfRevenue = todayTransactions
-    .filter(t => t.type && t.type.toUpperCase() === 'SALE')
-    .reduce((sum, t) => {
-      const itemsCost = (t.items || []).reduce((itemSum, item) => {
-        const product = products.find(p => p.id === item.productId);
-        return itemSum + (Number(product?.cost || 0) * Number(item.quantity || 0));
-      }, 0);
-      return sum + itemsCost;
-    }, 0);
-
-  const todayProfit = todayRevenue - todayCostOfRevenue;
-
-  const todayCash = todayTransactions
-    .filter(t => {
-      const txType = t.type ? t.type.toUpperCase() : '';
-      return (txType === 'SALE' && t.paymentMethod === 'CASH') || txType === 'CREDIT_PAYMENT';
-    })
-    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 selection:bg-indigo-100 selection:text-indigo-700">
       <Sidebar 
         currentView={currentView} 
         setView={setCurrentView} 
         userProfile={userProfile} 
-        accounts={accounts}
-        todayRevenue={todayRevenue}
-        todayProfit={todayProfit}
-        todayCash={todayCash}
+        accounts={accounts} 
         onEditProfile={() => setCurrentView('SETTINGS')}
         onLogout={handleLogout}
         onSwitchBranch={(b) => {
