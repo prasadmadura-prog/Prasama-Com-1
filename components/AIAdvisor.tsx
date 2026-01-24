@@ -38,8 +38,8 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ transactions, products, vendors, 
     setIsTyping(true);
 
     try {
-      // Fix: Always create a new GoogleGenAI instance right before making an API call
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // Best practice: Use GoogleGenAI without explicit apiKey to automatically use GEMINI_API_KEY env variable
+      const ai = new GoogleGenAI({});
       
       // Constructing detailed business context for analysis
       const businessContext = {
@@ -51,7 +51,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ transactions, products, vendors, 
         vendorDebt: vendors.map(v => ({ name: v.name, balance: v.totalBalance }))
       };
 
-      // Fix: Use the systemInstruction configuration property and stream the response
+      // Use systemInstruction in config to guide the model's behavior
       const result = await ai.models.generateContentStream({
         model: 'gemini-3-pro-preview',
         contents: currentInput,
@@ -64,7 +64,7 @@ const AIAdvisor: React.FC<AIAdvisorProps> = ({ transactions, products, vendors, 
       setMessages(prev => [...prev, { role: 'model', text: '' }]);
 
       for await (const chunk of result) {
-        // Fix: Access .text as a property (not a method) and handle potential undefined
+        // Access .text as a property and handle potential undefined
         const textChunk = chunk.text || '';
         fullText += textChunk;
         setMessages(prev => {
