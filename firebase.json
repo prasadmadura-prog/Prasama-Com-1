@@ -9,11 +9,13 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "redirects": [
+    "rewrites": [
       {
         "source": "**",
-        "destination": "https://prasama-pvt-ltd-erp-pos-147440081288.us-west1.run.app/",
-        "type": 302
+        "run": {
+          "serviceId": "prasama-pvt-ltd-erp-pos-147440081288",
+          "region": "us-west1"
+        }
       }
     ]
   }
