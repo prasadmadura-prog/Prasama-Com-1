@@ -30,9 +30,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   };
 
   const today = getTodayLocal();
-  
-  // Default to only today's entries
-  const defaultStart = today;
+
+  // Helper: Default to last 30 days instead of today only
+  const getDefaultFromDate = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+
+  const defaultStart = getDefaultFromDate();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [startDate, setStartDate] = useState(defaultStart);
@@ -357,7 +363,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           <option value="cashier-1">Cashier 1</option>
           <option value="cashier-2">Cashier 2</option>
         </select>
-        <button onClick={resetFilters} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Reset to Today">↺ Today</button>
+        <button onClick={resetFilters} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Reset to Last 30 Days">↺ 30d</button>
         <button onClick={showAllHistory} className="px-2 py-1.5 rounded-md border border-neutral-200 bg-white text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-all" title="Show full history">∞ All</button>
         <div className="flex gap-1 ml-2">
           {[
@@ -624,3 +630,5 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 };
 
 export default SalesHistory;
+
+
