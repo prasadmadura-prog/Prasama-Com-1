@@ -30,11 +30,11 @@ const Dashboard: React.FC<DashboardProps> = ({
   const stats = useMemo(() => {
     // Calculate ALL-TIME sales metrics (not just today)
     const allSalesTotal = transactions
-      .filter(t => t.type === 'SALE')
+      .filter(t => t.type && t.type.toUpperCase() === 'SALE')
       .reduce((acc, t) => acc + Number(t.amount), 0);
 
     const allCostOfRevenue = transactions
-      .filter(t => t.type === 'SALE')
+      .filter(t => t.type && t.type.toUpperCase() === 'SALE')
       .reduce((acc, t) => {
         const itemsCost = t.items?.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
@@ -110,7 +110,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     }).reverse();
 
     last7Days.forEach(day => daily[day] = 0);
-    transactions.filter(t => t.type === 'SALE').forEach(t => {
+    transactions.filter(t => t.type && t.type.toUpperCase() === 'SALE').forEach(t => {
       const d = new Date(t.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
       if (daily[d] !== undefined) daily[d] += Number(t.amount);
     });
@@ -124,7 +124,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const itemProfitTotals: Record<string, { name: string; profit: number; revenue: number; qty: number }> = {};
 
     transactions
-      .filter(t => t.type === 'SALE')
+      .filter(t => t.type && t.type.toUpperCase() === 'SALE')
       .forEach(t => {
         (t.items || []).forEach(item => {
           const product = products.find(p => p.id === item.productId);
