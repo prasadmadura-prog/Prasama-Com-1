@@ -1,0 +1,27 @@
+<<<<<<< HEAD
+.git
+.gitignore
+node_modules
+Dockerfile
+.dockerignore
+.DS_Store
+Thumbs.db
+README.md
+*.log
+.env
+.local
+prasama_backup_*.json
+=======
+.git
+.gitignore
+node_modules
+Dockerfile
+.dockerignore
+.DS_Store
+Thumbs.db
+README.md
+*.log
+.env
+.local
+prasama_backup_*.json
+>>>>>>> 8a53427646b2ef7bada0745373a760d4f1e7e148
