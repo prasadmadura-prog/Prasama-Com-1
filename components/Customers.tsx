@@ -74,8 +74,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
 
     try {
       const amount = parseFloat(paymentAmount);
-      if (isNaN(amount) || amount <= 0) {
-        alert("Please enter a valid amount.");
+      if (isNaN(amount) || amount === 0) {
+        alert("Please enter a valid amount (Positive for Payment, Negative for Advance/Refund).");
         return;
       }
 
@@ -86,11 +86,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
         accountId: paymentAccountId,
         customerId: selectedForPayment.id,
         parentTxId: targetInvoiceId || undefined,
-        description: `CREDIT SETTLEMENT: Rs. ${amount.toLocaleString()} RECEIVED VIA ${paymentMethod} ${targetInvoiceId ? `(INV: ${targetInvoiceId.substring(0, 8)})` : ''} ${paymentMethod === 'CHEQUE' ? `(CHQ: ${chequeNumber})` : ''}`,
+        description: amount > 0
+          ? `CREDIT SETTLEMENT: Rs. ${amount.toLocaleString()} RECEIVED VIA ${paymentMethod} ${targetInvoiceId ? `(INV: ${targetInvoiceId.substring(0, 8)})` : ''} ${paymentMethod === 'CHEQUE' ? `(CHQ: ${chequeNumber})` : ''}`
+          : `CASH ADVANCE / REFUND: Rs. ${Math.abs(amount).toLocaleString()} PAID VIA ${paymentMethod}`,
         ...(paymentMethod === 'CHEQUE' && { chequeNumber, chequeDate }),
       });
 
-      alert("REPAYMENT RECORDED SUCCESSFULLY");
+      alert(amount > 0 ? "REPAYMENT RECORDED SUCCESSFULLY" : "CASH ADVANCE RECORDED SUCCESSFULLY");
       setIsPaymentModalOpen(false);
       setSelectedForPayment(null);
       setTargetInvoiceId('');
@@ -99,18 +101,22 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
       setPaymentMethod('CASH');
       setPaymentAccountId('cash');
     } catch (err: any) {
-      alert("FAILED TO RECORD REPAYMENT: " + err.message);
+      alert("FAILED TO RECORD TRANSACTION: " + err.message);
     }
   };
 
   const filteredCustomers = useMemo(() => {
-    if (!searchTerm.trim()) return customers;
-    const lowerSearch = searchTerm.toLowerCase();
-    return customers.filter(c =>
-      c.name.toLowerCase().includes(lowerSearch) ||
-      c.phone.includes(searchTerm) ||
-      c.email.toLowerCase().includes(lowerSearch)
-    );
+    let result = customers;
+    if (searchTerm.trim()) {
+      const lowerSearch = searchTerm.toLowerCase();
+      result = customers.filter(c =>
+        c.name.toLowerCase().includes(lowerSearch) ||
+        c.phone.includes(searchTerm) ||
+        c.email.toLowerCase().includes(lowerSearch)
+      );
+    }
+    // Sort by outstanding (high to low)
+    return result.sort((a, b) => b.totalCredit - a.totalCredit).slice(0, 50);
   }, [customers, searchTerm]);
 
   const customerHistory = useMemo(() => {
@@ -126,12 +132,41 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
   }, [customerHistory]);
 
   const exposureAggregate = useMemo(() => {
+    // Correct aggregate should be: (Total Payments) - (Total Billed)
+    // To handle the "linked" payments correctly without double counting:
+    // We sum all Payments (independent of links) and then subtract (Billed - Initial POS Payment).
+    // A simpler but equivalent way using the new logic:
     return customerHistory.reduce((sum, tx) => {
-      if (tx.type === 'SALE') {
-        const creditImpact = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
-        return sum - creditImpact;
+      if (tx.type === 'SALE' || tx.type === 'LOAN_GIVEN' || tx.type === 'SALE_HISTORY_IMPORT') {
+        // Impact of a sale is the balance that was NOT paid at POS
+        // However, if we count all CREDIT_PAYMENT rows separately, we should use the total Billed amount here.
+        // Debit: Total Amount
+        sum -= Number(tx.amount || 0);
+
+        // Credit: Only the part paid at the time of sale (POS)
+        // We calculate this as (Total Paid - Sum of all linked payments)
+        // BUT wait, a simpler way is: Debit = Amount, Credit = All Payments (Linked + Unlinked) + Initial Paid.
+        // If 'paidAmount' is updated by links, then 'paidAmount' is Total Paid.
+        // So for the sale row alone, we should add back 'paidAmount'.
+        sum += Number(tx.paidAmount || 0);
+        return sum;
       }
-      if (tx.type === 'CREDIT_PAYMENT') return sum + (Number(tx.amount) || 0);
+      if (tx.type === 'CREDIT_PAYMENT') {
+        // IF the payment is linked to a SALE in this same history, and that SALE is using its 'paidAmount' (which includes this payment),
+        // we would double count.
+        // SOLUTION: Only add CREDIT_PAYMENT if it's NOT linked to a transaction already in the bucket? 
+        // No, easier: aggregate = sum(Sales.initialPaid) + sum(All CreditPayments) - sum(Sales.amount).
+        // Since we don't have initialPaid separately, we use:
+        // Aggregate = sum(All CreditPayments) - sum(Sales where paymentMethod == 'CREDIT' ? amount : balanceDue)
+
+        // Let's use the most reliable formula:
+        if (tx.parentTxId) {
+          // If it's linked, its impact is already included in the parent's balanceDue / paidAmount.
+          // So we skip adding it here to avoid double-counting.
+          return sum;
+        }
+        return sum + (Number(tx.amount) || 0);
+      }
       return sum;
     }, 0);
   }, [customerHistory]);
@@ -146,26 +181,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
     const fd = new FormData(e.currentTarget);
 
     const newAmount = editingTx.type === 'SALE' ? tempTotal : Number(fd.get('amount'));
+    const newPaidAmount = Number(fd.get('paidAmount')) || 0;
     const newMethod = fd.get('paymentMethod') as any;
 
-    // Maintain internal balance logic during edit
-    let newPaidAmount = editingTx.paidAmount;
-    let newBalanceDue = editingTx.balanceDue;
+    let newBalanceDue = Math.max(0, newAmount - newPaidAmount);
 
-    if (editingTx.type === 'SALE') {
-      if (newMethod === 'CREDIT') {
-        newPaidAmount = 0;
-        newBalanceDue = newAmount;
-      } else {
-        // For CASH/BANK/etc, we assume the payment matches the new total unless it was already a partial payment
-        const wasPartial = (editingTx.balanceDue || 0) > 0 && (editingTx.paidAmount || 0) > 0;
-        if (wasPartial) {
-          newBalanceDue = Math.max(0, newAmount - (editingTx.paidAmount || 0));
-        } else {
-          newPaidAmount = newAmount;
-          newBalanceDue = 0;
-        }
-      }
+    if (editingTx.type === 'SALE' && newMethod === 'CREDIT') {
+      newBalanceDue = newAmount;
     }
 
     const updated: Transaction = {
@@ -222,11 +244,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
 
     const rowsHtml = customerHistory.map(tx => {
       const dateStr = new Date(tx.date).toLocaleDateString();
-      const debit = tx.type === 'SALE' && ((tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0)) > 0)
-        ? (tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0))
-        : 0;
+      const debit = (tx.type === 'SALE' || tx.type === 'LOAN_GIVEN') ? Number(tx.amount) : 0;
 
-      const credit = tx.type === 'CREDIT_PAYMENT' ? Number(tx.amount) : 0;
+      const credit = tx.type === 'CREDIT_PAYMENT'
+        ? Number(tx.amount)
+        : (tx.type === 'SALE' ? Number(tx.paidAmount || 0) : 0);
 
       return `
         <tr>
@@ -241,14 +263,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
 
     const totalDebit = customerHistory.reduce((sum, tx) => {
       if (tx.type === 'SALE') {
-        const amt = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
-        return sum + amt;
+        return sum + Number(tx.amount);
       }
+      if (tx.type === 'LOAN_GIVEN') return sum + Number(tx.amount);
       return sum;
     }, 0);
 
     const totalCredit = customerHistory.reduce((sum, tx) => {
       if (tx.type === 'CREDIT_PAYMENT') return sum + Number(tx.amount);
+      if (tx.type === 'SALE') return sum + Number(tx.paidAmount || 0);
       return sum;
     }, 0);
 
@@ -396,7 +419,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
                     </span>
                   </div>
                   <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all ${isOverLimit ? 'bg-rose-600' : (usagePercent > 90 ? 'bg-rose-500' : 'bg-emerald-500')}`}
+                    <div className={`h-full rounded-full transition-all ${isOverLimit ? 'bg-rose-600' : 'bg-rose-500'}`}
                       style={{ width: `${usagePercent}%` }} />
                   </div>
                 </div>
@@ -515,8 +538,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
           <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
             <div className="p-10 space-y-8 text-center">
               <div className="space-y-2">
-                <h3 className="font-black text-2xl text-slate-900 uppercase tracking-tighter">Debt Settlement</h3>
-                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Authorize incoming capital inflow</p>
+                <h3 className="font-black text-2xl text-slate-900 uppercase tracking-tighter">Debt Settlement / Advance</h3>
+                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Authorize Transaction (Inflow/Outflow)</p>
               </div>
 
               <div className={`${selectedForPayment.totalCredit > selectedForPayment.creditLimit ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'} p-6 rounded-[2.5rem] border flex flex-col items-center`}>
@@ -549,7 +572,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
 
               <form onSubmit={handleReceivePayment} className="space-y-6 text-left">
                 <div className="space-y-3">
-                  <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Settlement Amount (Rs.)</label>
+                  <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest text-center">Amount (Rs.) • Use (-) for Refund/Advance</label>
                   <input
                     type="number"
                     step="0.01"
@@ -558,7 +581,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
                     value={paymentAmount}
                     onChange={e => setPaymentAmount(e.target.value)}
                     autoFocus
-                    placeholder="0.00"
+                    placeholder="Amount (+ Pay / - Adv)"
                   />
                 </div>
 
@@ -684,23 +707,33 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
                         <td className="px-10 py-6 text-slate-500 text-[12px] font-bold uppercase leading-tight">
                           <span className="block mb-2 text-slate-700">{tx.description}</span>
                           <div className="flex gap-2">
-                            <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 border rounded-lg ${tx.type === 'SALE' ? 'bg-indigo-50 border-indigo-100 text-[#6366f1]' : 'bg-emerald-50 border-emerald-100 text-emerald-600'}`}>
-                              {tx.type === 'SALE' ? 'CREDIT TAKEN' : 'CREDIT PAID'}
+                            <span className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 border rounded-lg ${tx.type === 'SALE' || tx.type === 'LOAN_GIVEN' ? 'bg-indigo-50 border-indigo-100 text-[#6366f1]' : 'bg-emerald-50 border-emerald-100 text-emerald-600'}`}>
+                              {tx.type === 'SALE' ? 'CREDIT TAKEN' : tx.type === 'LOAN_GIVEN' ? 'LOAN ISSUED' : 'CREDIT PAID'}
                             </span>
                             <span className="text-[9px] font-black uppercase tracking-widest px-3 py-1 bg-slate-50 border border-slate-100 rounded-lg text-slate-400">
                               {tx.paymentMethod}
                             </span>
                           </div>
                         </td>
-                        <td className={`px-10 py-6 text-right font-black font-mono text-[15px] ${tx.type === 'SALE' ? 'text-rose-600' : 'text-slate-300'}`}>
-                          {tx.type === 'SALE' ? (
-                            (tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0)) > 0
-                              ? `- ${(tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0)).toLocaleString()}`
-                              : '0'
-                          ) : '—'}
+                        <td className={`px-10 py-6 text-right font-black font-mono text-[15px] ${tx.type === 'SALE' || tx.type === 'LOAN_GIVEN' ? 'text-rose-600' : 'text-slate-300'}`}>
+                          {(tx.type === 'SALE' || tx.type === 'LOAN_GIVEN') ? `- ${Number(tx.amount).toLocaleString()}` : '—'}
                         </td>
-                        <td className={`px-10 py-6 text-right font-black font-mono text-[15px] ${tx.type === 'CREDIT_PAYMENT' ? 'text-emerald-600' : 'text-slate-300'}`}>
-                          {tx.type === 'CREDIT_PAYMENT' ? `+ ${Number(tx.amount).toLocaleString()}` : '—'}
+                        <td className={`px-10 py-6 text-right font-black font-mono text-[15px] ${tx.type === 'CREDIT_PAYMENT' || (tx.type === 'SALE' && (tx.paidAmount || 0) > 0) ? 'text-emerald-600' : 'text-slate-300'}`}>
+                          {tx.type === 'CREDIT_PAYMENT'
+                            ? `+ ${Number(tx.amount).toLocaleString()}`
+                            : (tx.type === 'SALE' && (tx.paidAmount || 0) > 0)
+                              ? (
+                                (() => {
+                                  // Deduct linked payments from the total 'paidAmount' to show residual (Initial) payment for this row
+                                  const linkedTotal = customerHistory
+                                    .filter(lt => lt.parentTxId === tx.id && lt.type === 'CREDIT_PAYMENT')
+                                    .reduce((s, lt) => s + Number(lt.amount || 0), 0);
+                                  const initialPaid = Math.max(0, Number(tx.paidAmount || 0) - linkedTotal);
+                                  return initialPaid > 0 ? `+ ${initialPaid.toLocaleString()}` : '—';
+                                })()
+                              )
+                              : '—'
+                          }
                         </td>
                         <td className="px-10 py-6 text-center">
                           <div className="flex justify-center gap-2">
@@ -754,6 +787,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Transaction Value (Rs.)</label>
                   <input name="amount" type="number" step="0.01" required={editingTx.type !== 'SALE'} readOnly={editingTx.type === 'SALE'} className={`w-full px-6 py-4 rounded-2xl border border-slate-200 font-black font-mono text-lg text-indigo-600 outline-none focus:border-indigo-500 ${editingTx.type === 'SALE' ? 'bg-slate-50' : 'bg-white'}`} value={editingTx.type === 'SALE' ? tempTotal : undefined} defaultValue={editingTx.type !== 'SALE' ? editingTx.amount : undefined} />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount Paid / Inflow (Rs.)</label>
+                  <input name="paidAmount" type="number" step="0.01" required className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black font-mono text-lg text-emerald-600 bg-white outline-none focus:border-emerald-500" defaultValue={editingTx.paidAmount || (editingTx.type === 'CREDIT_PAYMENT' ? editingTx.amount : 0)} />
                 </div>
               </div>
 

@@ -17,6 +17,7 @@ interface SalesHistoryProps {
   onDeleteTransaction: (id: string) => void;
   jumpTarget?: { type: 'PO' | 'CUSTOMER' | 'VENDOR' | 'SALE'; id: string } | null;
   clearJump?: () => void;
+  purchaseOrders?: any[]; // Added to track non-transactional POs
   onResumeDraft?: (tx: Transaction) => void;
 }
 
@@ -32,6 +33,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   onDeleteTransaction,
   jumpTarget,
   clearJump,
+  purchaseOrders = [],
   onResumeDraft
 }) => {
   const getTodayLocal = () => {
@@ -65,6 +67,14 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     }
   }, [userProfile.branch, userProfile.email, userProfile.loginUsername]);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, startDate, endDate, activeTab, cashierFilter]);
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [tempItems, setTempItems] = useState<{ productId: string; quantity: number; price: number; discount?: number }[]>([]);
@@ -95,7 +105,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const ledgerEntries = useMemo(() => {
     if (!Array.isArray(transactions)) return [];
-    return transactions.filter(t => t && (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || t.type === 'SALE_HISTORY_IMPORT'));
+    // Include all commercial transaction types for a complete ledger and accurate summary stats
+    const ledgerTypes = ['SALE', 'CREDIT_PAYMENT', 'SALE_HISTORY_IMPORT', 'EXPENSE', 'PURCHASE', 'TRANSFER', 'LOAN_GIVEN'];
+    return transactions.filter(t => t && ledgerTypes.includes(t.type));
   }, [transactions]);
 
   // ---- HELPER: Normalize Branch ----
@@ -107,6 +119,47 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       return 'CASHIER 1';
     }
     return b;
+  };
+
+  // Helper to identify a reload item robustly
+  const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
+    const pName = (product?.name || "").toUpperCase();
+    const cName = (category?.name || "").toUpperCase();
+    const pId = (item.productId || "").toUpperCase();
+    const desc = txDescription.toUpperCase();
+
+    return cName.includes('RELOAD') ||
+      pName.includes('RELOAD') ||
+      pId.includes('RELOAD') ||
+      desc.includes('RELOAD') ||
+      // Also check provider names if not explicitly labeled reload
+      pName.includes('DIALOG') || pName.includes('MOBITEL') || pName.includes('AIRTEL') || pName.includes('HUTCH') ||
+      cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
+  };
+
+  const calculateTransactionProfit = (tx: Transaction) => {
+    // If no items, check description for reload tag to avoid 100% profit misclassification
+    if ((tx.type !== 'SALE' && tx.type !== 'SALE_HISTORY_IMPORT') || !tx.items || tx.items.length === 0) {
+      if (tx.type === 'SALE' || tx.type === 'SALE_HISTORY_IMPORT') {
+        const desc = (tx.description || '').toUpperCase();
+        const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+        return isReload ? Number(tx.amount || 0) * 0.04 : Number(tx.amount || 0);
+      }
+      return 0;
+    }
+
+    return tx.items.reduce((acc, item) => {
+      const product = products.find(p => p.id === item.productId);
+      const category = categories.find(c => c.id === product?.categoryId);
+      const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+
+      if (isReloadItem(item, product, category, tx.description)) {
+        return acc + (lineTotal * 0.04);
+      } else {
+        const cost = (Number(product?.cost || 0) * Number(item.quantity));
+        return acc + (lineTotal - cost);
+      }
+    }, 0);
   };
 
   const filteredEntries = useMemo(() => {
@@ -154,6 +207,12 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       })
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [ledgerEntries, searchTerm, startDate, endDate, activeTab, products, customers, jumpTarget, cashierFilter]);
+
+  const totalPages = Math.ceil(filteredEntries.length / ITEMS_PER_PAGE);
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredEntries.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredEntries, currentPage]);
 
   const getCustomerName = (id?: string) => {
     if (!id) return 'Walk-in Customer';
@@ -457,11 +516,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   };
 
   const summaryStats = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todaySessionFloat = daySessions
-      .filter(s => s.date === todayStr && (cashierFilter === 'ALL' || normalizeBranch(s.branchId) === normalizeBranch(cashierFilter)))
-      .reduce((acc, s) => acc + Number(s.openingBalance || 0), 0);
-    const openingFloat = todaySessionFloat;
+    const getTodayLocal = () => {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    };
+    const todayStr = getTodayLocal();
 
     const rangeEntries = ledgerEntries.filter(s => {
       const txDateStr = typeof s.date === 'string' ? s.date.split('T')[0] : '';
@@ -474,25 +533,32 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       return matchesDate && matchesCashier;
     });
 
-    const costOfRevenue = rangeEntries
-      .filter(s => s.type === 'SALE')
-      .reduce((acc, t) => {
-        const itemsCost = t.items?.reduce((itemAcc, item) => {
-          const product = products.find(p => p.id === item.productId);
-          return itemAcc + (Number(product?.cost || 0) * Number(item.quantity));
-        }, 0) || 0;
-        return acc + itemsCost;
-      }, 0);
+    const rangeOpeningBalance = (daySessions || []).filter(s => {
+      const dDateStr = typeof s.date === 'string' ? s.date.split('T')[0] : '';
+      const matchesDate = (!startDate || dDateStr >= startDate) && (!endDate || dDateStr <= endDate);
+      const sBranch = normalizeBranch(s.branchId);
+      const targetFilter = normalizeBranch(cashierFilter);
+      const matchesCashier = cashierFilter === 'ALL' || sBranch === targetFilter;
+      return matchesDate && matchesCashier;
+    }).reduce((acc, s) => acc + (Number(s.openingBalance) || 0), 0);
 
-    // Calculate reload sales separately
+
+
+    // Total revenue EXCLUDING reload category
+    // Calculate reload sales separately for use in Revenue/Profit logic
     const reloadSales = rangeEntries
       .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
       .reduce((acc, t) => {
-        if (!t.items) return acc;
+        if (!t.items) {
+          const desc = (t.description || '').toUpperCase();
+          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          return isReload ? acc + Number(t.amount || 0) : acc;
+        }
         const reloadAmount = t.items.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
           const category = categories.find(c => c.id === product?.categoryId);
-          if (category?.name?.toLowerCase() === 'reload') {
+
+          if (isReloadItem(item, product, category, t.description)) {
             return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
           }
           return itemAcc;
@@ -501,14 +567,18 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       }, 0);
 
     // Total revenue EXCLUDING reload category
-    const totalRevenue = rangeEntries
+    const revenueExcludingReload = rangeEntries
       .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
       .reduce((acc, t) => {
-        if (!t.items) return acc + Number(t.amount || 0);
+        if (!t.items) {
+          const desc = (t.description || '').toUpperCase();
+          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          return isReload ? acc : acc + Number(t.amount || 0);
+        }
         const nonReloadAmount = t.items.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
           const category = categories.find(c => c.id === product?.categoryId);
-          if (category?.name?.toLowerCase() !== 'reload') {
+          if (!isReloadItem(item, product, category, t.description)) {
             return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
           }
           return itemAcc;
@@ -516,68 +586,188 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         return acc + nonReloadAmount;
       }, 0);
 
+    // FIX: Total Revenue should be Non-Reload Revenue + 4% of Reload Sales (Matching POS "Inflow" & Dashboard)
+    const totalRevenue = revenueExcludingReload + (reloadSales * 0.04);
+
     const realizedInflow = rangeEntries
       .filter(s => (s.type === 'SALE' && s.paymentMethod !== 'CREDIT') || s.type === 'CREDIT_PAYMENT' || s.type === 'SALE_HISTORY_IMPORT')
-      .reduce((a, b) => a + Number(b.amount || 0), 0);
+      .reduce((a, b) => {
+        // For Credit Payment, it's full value
+        if (b.type === 'CREDIT_PAYMENT') return a + Number(b.amount || 0);
 
-    // Profit = (Revenue - Cost) + 4% of reload sales
-    const reloadProfit = reloadSales * 0.04;
-    const profit = (totalRevenue - costOfRevenue) + reloadProfit;
-    const margin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
-    const roi = costOfRevenue > 0 ? (profit / costOfRevenue) * 100 : 0;
+        // For Sales, we need to respect the 4% logic for reloads
+        if (!b.items) return a + Number(b.amount || 0);
 
-    // Real-time Cash Position Calculation for the selected terminal
-    const filteredTxs = transactions.filter(t => {
-      const isToday = t.date.split('T')[0] === todayStr;
-      const sBranch = normalizeBranch(t.branchId);
-      const targetFilter = normalizeBranch(cashierFilter);
-      const matchesCashier = cashierFilter === 'ALL' || sBranch === targetFilter;
-      return isToday && matchesCashier;
-    });
+        // Calculate sale realization based on Items
+        const saleRealized = b.items.reduce((acc, item) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          const itemNet = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-    const cashIn = filteredTxs.filter(t =>
-      (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || (t.type === 'TRANSFER' && t.destinationAccountId === 'cash'))
-      && t.paymentMethod === 'CASH'
-    ).reduce((acc, t) => acc + Number(t.amount || 0), 0);
+          if (isReloadItem(item, product, category, b.description)) {
+            return acc + (itemNet * 0.04);
+          }
+          return acc + itemNet;
+        }, 0);
 
-    const cashOut = filteredTxs.filter(t =>
-      (t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId === 'cash'))
-      && t.paymentMethod === 'CASH'
-    ).reduce((acc, t) => acc + Number(t.amount || 0), 0);
+        return a + saleRealized;
+      }, 0);
 
-    const cashPosition = openingFloat + cashIn - cashOut;
+    // Profit = (Revenue - Cost) + 4% of reload sales (Already covered by totalRevenue - cost + 0 if we consider reload cost as 0 here? No costOfRevenue calculation needs check)
+    // Actually: Profit = (NonReloadRev - NonReloadCost) + ReloadMargin
+    // costOfRevenue above calculates cost for ALL items including reloads?
+    // We need to exclude Reload Cost from costOfRevenue if we are treating Reload Rev as Margin.
+    // Or simpler: Profit is correct as implemented before if costOfRevenue correctly reflects costs?
+    // In POS: Reload Cost = 96% of Price. Item Cost in DB might be 0 or 96?
+    // In POS handleQuickReload: cost = amount * 0.96.
+    // So costOfRevenue WILL include 96% cost.
+    // Profit = (TotalGrossRevenue - TotalCost).
+    // TotalGrossRevenue = NonReload + ReloadGross.
+    // Profit = (NonReload - NonReloadCost) + (ReloadGross - ReloadCost).
+    // ReloadProfit = ReloadGross - (ReloadGross * 0.96) = ReloadGross * 0.04.
+    // THIS MATCHES `reloadProfit` calculated below.
+    // BUT `costOfRevenue` includes reload cost.
+    // And `totalRevenue` (variable `revenueExcludingReload`) excludes reload revenue.
+    // So `profit` formula below was: (revenueExcludingReload - costOfRevenue) + reloadProfit.
+    // If `costOfRevenue` INCLUDES reload cost, then:
+    // Profit = (NonReloadRev - (NonReloadCost + ReloadCost)) + ReloadProfit.
+    // Profit = NonReloadRev - NonReloadCost - ReloadCost + ReloadProfit.
+    // This is WRONG. It subtracts ReloadCost!
+    // We must ensure costOfRevenue EXCLUDES reload cost if we use this formula.
 
+    // REDEFINE costOfRevenue to EXCLUDE reloads
+    const costOfRevenue = rangeEntries
+      .filter(s => s.type === 'SALE')
+      .reduce((acc, t) => {
+        const itemsCost = t.items?.reduce((itemAcc, item) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          if (!isReloadItem(item, product, category, t.description)) {
+            return itemAcc + (Number(product?.cost || 0) * Number(item.quantity));
+          }
+          return itemAcc;
+        }, 0) || 0;
+        return acc + itemsCost;
+      }, 0);
 
     const totalExpenses = rangeEntries
       .filter(s => s.type === 'EXPENSE')
       .reduce((a, b) => a + Number(b.amount || 0), 0);
+
+    const manualPurchases = rangeEntries
+      .filter(s => s.type === 'PURCHASE' && !s.id.startsWith('PU-'))
+      .reduce((a, b) => a + Number(b.amount || 0), 0);
+
+    const poPurchases = (purchaseOrders || []).filter(po => {
+      const poBranch = (po.branchId || '').toUpperCase();
+      const target = cashierFilter === 'ALL' ? '' : cashierFilter.toUpperCase();
+      const branchMatch = cashierFilter === 'ALL' || poBranch === target;
+      const txDate = (typeof po.date === 'string') ? po.date.split('T')[0] : '';
+      const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
+      return branchMatch && dateMatch && po.status !== 'DRAFT';
+    }).reduce((acc, po) => acc + Number(po.totalAmount || 0), 0);
+
+    const totalPurchases = manualPurchases + poPurchases;
+
+    // Profit = (NonReload Revenue - NonReload Cost) + 4% of reload sales - totalExpenses
+    const reloadProfit = reloadSales * 0.04;
+    const profit = (revenueExcludingReload - costOfRevenue) + reloadProfit - totalExpenses;
+
+    // Net Revenue = Total Sales - Total Purchases
+    const netRevenue = totalRevenue - totalPurchases;
+
+    const margin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
+    const roi = costOfRevenue > 0 ? (profit / costOfRevenue) * 100 : 0;
+
+    // Cash Position = Opening + Total Sales - Expenses - Purchases (as requested)
+    // Note: totalRevenue here is the gross inflow (Retail + 4% Reload)
+    const cashPosition = rangeOpeningBalance + totalRevenue - totalExpenses - totalPurchases;
+
+
+
 
     const creditDue = rangeEntries
       .filter(s => s.type === 'SALE' && s.paymentMethod === 'CREDIT')
       .reduce((a, b) => a + Number(b.amount || 0), 0);
 
     // Branch Breakdown
-    const branchBreakdown: Record<string, { revenue: number, count: number }> = {};
+    const branchBreakdown: Record<string, {
+      revenue: number,
+      profit: number,
+      count: number,
+      reloadRevenue: number,
+      reloadProfit: number,
+      retailRevenue: number,
+      retailProfit: number
+    }> = {
+      'CASHIER 1': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
+      'CASHIER 2': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 }
+    };
+
     rangeEntries.filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT').forEach(s => {
       const b = normalizeBranch(s.branchId);
-      if (!branchBreakdown[b]) branchBreakdown[b] = { revenue: 0, count: 0 };
-      branchBreakdown[b].revenue += Number(s.amount || 0);
+      if (!branchBreakdown[b]) {
+        branchBreakdown[b] = { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 };
+      }
+
+      let txReloadRevenue = 0;
+      let txReloadProfit = 0;
+      let txRetailRevenue = 0;
+      let txRetailProfit = 0;
+
+      if (s.items && s.items.length > 0) {
+        s.items.forEach(item => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+
+          if (isReloadItem(item, product, category, s.description)) {
+            txReloadRevenue += lineTotal;
+            txReloadProfit += (lineTotal * 0.04);
+          } else {
+            const cost = (Number(product?.cost || 0) * Number(item.quantity));
+            txRetailRevenue += lineTotal;
+            txRetailProfit += (lineTotal - cost);
+          }
+        });
+      } else {
+        const desc = (s.description || '').toUpperCase();
+        const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+        if (isReload) {
+          txReloadRevenue = Number(s.amount || 0);
+          txReloadProfit = txReloadRevenue * 0.04;
+        } else {
+          txRetailRevenue = Number(s.amount || 0);
+          txRetailProfit = Number(s.amount || 0); // Assuming 100% margin for unknown items? Or 0? Stick to original behavior for retail.
+        }
+      }
+
+      branchBreakdown[b].reloadRevenue += txReloadRevenue;
+      branchBreakdown[b].reloadProfit += txReloadProfit;
+      branchBreakdown[b].retailRevenue += txRetailRevenue;
+      branchBreakdown[b].retailProfit += txRetailProfit;
+
+      // Revenue here follows inflow logic: Retail + 4% of Reload
+      branchBreakdown[b].revenue += (txRetailRevenue + txReloadProfit);
+      branchBreakdown[b].profit += (txRetailProfit + txReloadProfit);
       branchBreakdown[b].count += 1;
     });
 
     return {
       costOfRevenue,
-      totalRevenue,
+      totalRevenue, // Now showing only gross sale value as requested
       realizedInflow,
       profit,
       margin,
       roi,
       cashPosition,
       totalExpenses,
+      totalPurchases,
       creditDue,
-      branchBreakdown
+      branchBreakdown,
+      reloadSales
     };
-  }, [ledgerEntries, transactions, daySessions, startDate, endDate, products, cashierFilter]);
+  }, [ledgerEntries, transactions, daySessions, startDate, endDate, products, categories, cashierFilter]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -587,106 +777,126 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">Audit trail & history records</p>
         </div>
 
-        {/* Branch Performance Summary - Bar Chart */}
-        <div className="bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm min-w-[500px] flex-1">
-          <p className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-6">Terminal Performance</p>
-          <div className="h-[120px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                layout="vertical"
-                data={Object.entries(summaryStats.branchBreakdown || {}).map(([name, stats]: [string, any]) => ({
-                  name,
-                  revenue: stats.revenue || 0,
-                  count: stats.count || 0
-                }))}
-                margin={{ top: 0, right: 20, left: 10, bottom: 0 }}
-              >
-                <XAxis type="number" hide />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  hide
-                />
-                <Tooltip
-                  cursor={{ fill: 'transparent' }}
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px' }}
-                  formatter={(value: number) => [`Rs. ${value.toLocaleString()}`, 'Revenue']}
-                />
-                <Bar dataKey="revenue" radius={[0, 6, 6, 0]} barSize={28}>
-                  {Object.entries(summaryStats.branchBreakdown || {}).map(([branch], index) => (
-                    <Cell key={`cell-${index}`} fill={branch === 'CASHIER 2' ? '#f97316' : '#6366f1'} />
-                  ))}
-                  <LabelList
-                    dataKey="name"
-                    position="insideLeft"
-                    offset={15}
-                    style={{ fontSize: '11px', fontWeight: '900', fill: '#ffffff', textTransform: 'uppercase' }}
-                  />
-                  <LabelList
-                    dataKey="revenue"
-                    position="insideRight"
-                    offset={15}
-                    formatter={(value: number) => `Rs. ${Math.round(value).toLocaleString()}`}
-                    style={{ fontSize: '12px', fontWeight: '900', fill: '#ffffff' }}
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+        {/* Performance Summary - Cards */}
+        <div className="bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm flex-1 max-w-2xl">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Operations Performance</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
+            {/* Vertical Divider for MD+ screens */}
+            <div className="absolute left-1/2 top-4 bottom-4 w-px bg-slate-100 hidden md:block"></div>
+
+            {/* Reload Sales (Branch Breakdown) */}
+            <div className="flex flex-col items-center">
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-4">Reload Sales</p>
+              <div className="flex justify-between w-full gap-4">
+                {['CASHIER 1', 'CASHIER 2'].map(branch => (
+                  <div key={branch} className="flex-1 text-center">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
+                    <p className="text-xl font-black text-rose-600 font-mono tracking-tighter mb-2">
+                      Rs. {Math.round(summaryStats.branchBreakdown[branch]?.reloadRevenue || 0).toLocaleString()}
+                    </p>
+                    <div className="bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100 inline-flex items-center gap-1.5">
+                      <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest">Profit</span>
+                      <span className="text-[10px] font-black font-mono text-emerald-600">Rs. {Math.round(summaryStats.branchBreakdown[branch]?.reloadProfit || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Retail Sales (Branch Breakdown) */}
+            <div className="flex flex-col items-center">
+              <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-4">Retail Sales</p>
+              <div className="flex justify-between w-full gap-4">
+                {['CASHIER 1', 'CASHIER 2'].map(branch => (
+                  <div key={branch} className="flex-1 text-center">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
+                    <p className="text-xl font-black text-slate-900 font-mono tracking-tighter mb-2">
+                      Rs. {Math.round(summaryStats.branchBreakdown[branch]?.retailRevenue || 0).toLocaleString()}
+                    </p>
+                    <div className="bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 inline-flex items-center gap-1.5">
+                      <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Profit</span>
+                      <span className="text-[10px] font-black font-mono text-slate-700">Rs. {Math.round(summaryStats.branchBreakdown[branch]?.retailProfit || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
       {/* STRATEGIC SUMMARY CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Yield %</p>
-          <p className="text-2xl font-black text-emerald-600 font-mono tracking-tighter">+{summaryStats.roi.toFixed(1)}%</p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Return on Cost</p>
-        </div>
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Profit</p>
-          <p className="text-2xl font-black text-emerald-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.profit).toLocaleString()}</p>
-          <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Margin: +{summaryStats.margin.toFixed(1)}%</p>
-        </div>
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Revenue</p>
-          <p className="text-2xl font-black text-indigo-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.totalRevenue).toLocaleString()}</p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Total Sales</p>
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Yield %</p>
+            <p className="text-2xl font-black text-emerald-600 font-mono tracking-tighter">+{summaryStats.roi.toFixed(1)}%</p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Return on Cost</p>
+          </div>
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Profit</p>
+            <p className="text-2xl font-black text-emerald-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.profit).toLocaleString()}</p>
+            <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Margin: +{summaryStats.margin.toFixed(1)}%</p>
+          </div>
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Revenue</p>
+            <p className="text-2xl font-black text-indigo-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.totalRevenue).toLocaleString()}</p>
+            <div className="h-3"></div> {/* Spacer to keep height consistent with other cards */}
+          </div>
+
+          {/* CASH POSITION CARD (REQUESTED) */}
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Cash Position</p>
+            <p className={`text-2xl font-black font-mono tracking-tighter ${summaryStats.cashPosition < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+              Rs. {Math.round(summaryStats.cashPosition).toLocaleString()}
+            </p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Net Liquid Position</p>
+          </div>
+
+          {/* Expenses KPI */}
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Expenses</p>
+            <p className="text-2xl font-black text-rose-500 font-mono tracking-tighter">Rs. {Math.round(summaryStats.totalExpenses).toLocaleString()}</p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Operational outflow</p>
+          </div>
+
+          {/* Purchases KPI */}
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Purchases</p>
+            <p className="text-2xl font-black text-rose-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.totalPurchases).toLocaleString()}</p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Inventory Outflow</p>
+          </div>
+
+          {/* Credit Due KPI */}
+          <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pending Credit</p>
+            <p className="text-2xl font-black text-amber-500 font-mono tracking-tighter">Rs. {Math.round(summaryStats.creditDue).toLocaleString()}</p>
+            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">To be collected</p>
+          </div>
         </div>
 
-        {/* CASH POSITION CARD (REQUESTED) */}
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Cash Position</p>
-          <p className={`text-2xl font-black font-mono tracking-tighter ${summaryStats.cashPosition < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
-            Rs. {Math.round(summaryStats.cashPosition).toLocaleString()}
-          </p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">In-Drawer Float</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Realized Inflow</p>
-          <p className="text-2xl font-black text-emerald-600 font-mono tracking-tighter">Rs. {Math.round(summaryStats.realizedInflow).toLocaleString()}</p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cash Collected</p>
-        </div>
-
-        {/* Expenses KPI */}
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Expenses</p>
-          <p className="text-2xl font-black text-rose-500 font-mono tracking-tighter">Rs. {Math.round(summaryStats.totalExpenses).toLocaleString()}</p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Operational outflow</p>
-        </div>
-
-        {/* Credit Due KPI */}
-        <div className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-4">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pending Credit</p>
-          <p className="text-2xl font-black text-amber-500 font-mono tracking-tighter">Rs. {Math.round(summaryStats.creditDue).toLocaleString()}</p>
-          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">To be collected</p>
+        {/* CALCULATION FORMULA LEGENDS (REQUESTED) */}
+        <div className="flex flex-col gap-2 mt-4">
+          <div className="flex justify-center items-center gap-2">
+            <div className="h-px bg-slate-100 flex-1"></div>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">
+              <span className="text-indigo-500">PROFIT CALCULATION:</span> ([Retail Sales - Cost] + 4% Reload Commission) - [Expenses]
+            </p>
+            <div className="h-px bg-slate-100 flex-1"></div>
+          </div>
+          <div className="flex justify-center items-center gap-2">
+            <div className="h-px bg-slate-100 flex-1"></div>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">
+              <span className="text-indigo-500">REVENUE CALCULATION:</span> Retail Sales + 4% Reload Commission
+            </p>
+            <div className="h-px bg-slate-100 flex-1"></div>
+          </div>
         </div>
       </div>
 
       <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 shadow-inner">
         {[
-          { id: 'ALL', label: 'All Sales' },
+          { id: 'ALL', label: 'All Entries' },
           { id: 'PAID', label: 'Paid' },
           { id: 'DUE', label: 'Credit' },
           { id: 'DRAFTS', label: 'Drafts' }
@@ -763,7 +973,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm border-collapse">
             <tbody className="divide-y divide-slate-50 font-medium">
-              {filteredEntries.map(tx => {
+              {paginatedEntries.map(tx => {
                 const isInflow = tx.type === 'SALE' || tx.type === 'CREDIT_PAYMENT' || (tx.type === 'TRANSFER' && tx.destinationAccountId === 'cash');
                 const isOutflow = tx.type === 'EXPENSE' || tx.type === 'PURCHASE' || tx.type === 'REFUND';
                 const account = accounts.find(a => a.id === tx.accountId);
@@ -773,6 +983,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 let description = tx.description;
                 if (tx.type === 'SALE') description = `SALE TO ${customerName}`;
                 if (tx.type === 'CREDIT_PAYMENT') description = `CREDIT SETTLEMENT: RS. ${Number(tx.amount).toLocaleString()} RECEIVED VIA ${tx.paymentMethod}`;
+
+                const isNegativeSale = tx.type === 'SALE' && (tx.amount || 0) < 0;
 
                 return (
                   <tr key={tx.id} className="hover:bg-slate-50 transition-all group align-middle">
@@ -802,10 +1014,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
                     <td className="px-4 py-4 w-[15%] text-center">
                       <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-widest ${tx.status === 'DRAFT' ? 'bg-amber-100 text-amber-700 border border-amber-200' :
-                        tx.type === 'SALE' || tx.type === 'CREDIT_PAYMENT' ? 'bg-emerald-50 text-emerald-600' :
-                          tx.type === 'EXPENSE' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'
+                        isNegativeSale ? 'bg-amber-50 text-amber-600' :
+                          tx.type === 'SALE' || tx.type === 'CREDIT_PAYMENT' ? 'bg-emerald-50 text-emerald-600' :
+                            tx.type === 'EXPENSE' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-500'
                         }`}>
-                        {tx.status === 'DRAFT' ? 'DRAFT SALE' : tx.type}
+                        {tx.status === 'DRAFT' ? 'DRAFT SALE' : (isNegativeSale ? 'PURCHASE' : tx.type)}
                       </span>
                     </td>
 
@@ -816,9 +1029,20 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                       </div>
                     </td>
 
-                    <td className={`px-6 py-4 w-[15%] text-right font-black font-mono text-[13px] tracking-tight ${isInflow ? 'text-emerald-700' : isOutflow ? 'text-rose-600' : 'text-slate-900'
+                    <td className={`px-6 py-4 w-[15%] text-right font-black font-mono text-[13px] tracking-tight ${isNegativeSale ? 'text-amber-600' : (isInflow ? 'text-emerald-700' : (isOutflow ? 'text-rose-600' : 'text-slate-900'))
                       }`}>
-                      {isInflow ? '+' : '-'} Rs. {Number(tx.amount || 0).toLocaleString()}
+                      {isInflow && !isNegativeSale ? '+' : ''} Rs. {Number(tx.amount || 0).toLocaleString()}
+
+                      {/* Profit Display - Added per user request */}
+                      {(tx.type === 'SALE' || tx.type === 'SALE_HISTORY_IMPORT') && (
+                        <div className="flex items-center justify-end gap-1.5 mt-1.5 opacity-90">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Profit</span>
+                          <span className="text-[11px] font-black font-mono text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                            Rs. {Math.round(calculateTransactionProfit(tx)).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+
                       {tx.branchId && (
                         <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-1 text-right">
                           {normalizeBranch(tx.branchId)}
@@ -829,7 +1053,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     <td className="px-4 py-4 w-[10%] text-right">
                       <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => {
-                          if (tx.status === 'DRAFT' && onResumeDraft) {
+                          if (tx.type === 'SALE' && onResumeDraft) {
                             onResumeDraft(tx);
                           } else {
                             setEditingTx(tx); setIsEditModalOpen(true);
@@ -850,8 +1074,38 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                   </td>
                 </tr>
               )}
+              {paginatedEntries.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-20 text-center opacity-30 text-xs font-black uppercase tracking-[0.4em] italic">No Transactions Found</td>
+                </tr>
+              )}
             </tbody>
           </table>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="px-8 py-6 bg-slate-50/50 border-t border-slate-50 flex items-center justify-between">
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                Showing Page {currentPage} of {totalPages} ({filteredEntries.length} Records)
+              </p>
+              <div className="flex gap-2">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
+                >
+                  ← Previous
+                </button>
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

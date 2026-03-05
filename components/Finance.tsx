@@ -1,6 +1,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { Transaction, Product, BankAccount, Vendor, UserProfile, DaySession, RecurringExpense, Customer } from '../types';
+import * as XLSX from 'xlsx';
+import { formatDateTime } from '../utils/dateFormatter';
 
 interface FinanceProps {
    accounts: BankAccount[];
@@ -21,16 +23,22 @@ interface FinanceProps {
    onDeleteRecurring: (id: string) => void;
    onUpsertAccount: (acc: BankAccount) => void;
    onDeleteAccount: (id: string) => void;
+   onResumeDraft: (tx: Transaction) => void;
+   onJumpTo?: (type: 'PO' | 'CUSTOMER' | 'VENDOR' | 'SALE', id: string) => void;
 }
 
 const Finance: React.FC<FinanceProps> = ({
    accounts = [], transactions = [], daySessions = [], products = [], vendors = [], recurringExpenses = [], customers = [], userProfile,
    onOpenDay, onCloseDay, onAddExpense, onAddTransfer, onUpdateTransaction, onDeleteTransaction,
-   onAddRecurring, onDeleteRecurring, onUpsertAccount, onDeleteAccount
+   onAddRecurring, onDeleteRecurring, onUpsertAccount, onDeleteAccount, onResumeDraft, onJumpTo
 }) => {
-   const today = new Date().toISOString().split('T')[0];
+   const getTodayLocal = () => {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+   };
+   const today = getTodayLocal();
    const currentSession = daySessions.find(s => s.date === today);
-   const dayTransactions = transactions.filter(t => t.date.split('T')[0] === today);
+   const dayTransactions = transactions.filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === today);
 
    // Modals State
    const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -54,6 +62,7 @@ const Finance: React.FC<FinanceProps> = ({
    const [expSource, setExpSource] = useState('cash');
    const [expIsLoan, setExpIsLoan] = useState(false);
    const [expCustomerId, setExpCustomerId] = useState('');
+   const [expDate, setExpDate] = useState(today);
 
    const [transAmount, setTransAmount] = useState('');
    const [transSource, setTransSource] = useState('cash');
@@ -82,14 +91,20 @@ const Finance: React.FC<FinanceProps> = ({
    // 2. Final filtered transactions for display
    const filteredTransactions = useMemo(() => {
       return periodTransactions.filter(t => {
-         const matchEntity = (t.description || '').toLowerCase().includes(filterEntity.toLowerCase()) ||
+         const matchEntity = !filterEntity ||
+            (t.description || '').toLowerCase().includes(filterEntity.toLowerCase()) ||
             (t.category || '').toLowerCase().includes(filterEntity.toLowerCase()) ||
-            (t.mainCategory || '').toLowerCase().includes(filterEntity.toLowerCase());
-         const matchProtocol = (t.type || '').toLowerCase().includes(filterProtocol.toLowerCase());
+            (t.mainCategory || '').toLowerCase().includes(filterEntity.toLowerCase()) ||
+            (t.id || '').toLowerCase().includes(filterEntity.toLowerCase());
+
+         const matchProtocol = !filterProtocol || (t.type || '').toUpperCase() === filterProtocol.toUpperCase();
+
          const sourceName = accounts.find(a => a.id === t.accountId)?.name || 'Direct';
          const destName = t.destinationAccountId ? (accounts.find(a => a.id === t.destinationAccountId)?.name || '') : '';
-         const matchSource = sourceName.toLowerCase().includes(filterSource.toLowerCase()) ||
-            destName.toLowerCase().includes(filterSource.toLowerCase());
+         const matchSource = !filterSource ||
+            sourceName.toUpperCase() === filterSource.toUpperCase() ||
+            destName.toUpperCase() === filterSource.toUpperCase();
+
          return matchEntity && matchProtocol && matchSource;
       });
    }, [periodTransactions, filterEntity, filterProtocol, filterSource, accounts]);
@@ -144,6 +159,8 @@ const Finance: React.FC<FinanceProps> = ({
       if (!expIsLoan && !expDesc) return;
       if (expIsLoan && !expCustomerId) return;
 
+      const finalDate = expDate ? (expDate + 'T' + new Date().toTimeString().split(' ')[0]) : new Date().toISOString();
+
       const finalDesc = expIsLoan
          ? (expDesc || `LOAN GIVEN TO ${customers.find(c => c.id === expCustomerId)?.name || 'CUSTOMER'}`).toUpperCase()
          : expDesc.toUpperCase();
@@ -160,7 +177,8 @@ const Finance: React.FC<FinanceProps> = ({
             paymentMethod: expSource === 'cash' ? 'CASH' : 'BANK',
             accountId: expSource,
             type: finalType,
-            customerId: expIsLoan ? expCustomerId : undefined
+            customerId: expIsLoan ? expCustomerId : undefined,
+            date: finalDate
          });
       } else {
          onAddExpense({
@@ -171,7 +189,8 @@ const Finance: React.FC<FinanceProps> = ({
             paymentMethod: expSource === 'cash' ? 'CASH' : 'BANK',
             accountId: expSource,
             type: finalType,
-            customerId: expIsLoan ? expCustomerId : undefined
+            customerId: expIsLoan ? expCustomerId : undefined,
+            date: finalDate
          });
       }
 
@@ -181,6 +200,7 @@ const Finance: React.FC<FinanceProps> = ({
       setExpMainCategory('');
       setExpIsLoan(false);
       setExpCustomerId('');
+      setExpDate(today);
       setEditingTransaction(null);
       setShowExpenseModal(false);
    };
@@ -224,7 +244,74 @@ const Finance: React.FC<FinanceProps> = ({
       setExpSource(tx.accountId || 'cash');
       setExpIsLoan(tx.type === 'LOAN_GIVEN');
       setExpCustomerId(tx.customerId || '');
+      setExpDate(tx.date.split('T')[0]);
       setShowExpenseModal(true);
+   };
+
+   const handleExportExcel = () => {
+      const data = filteredTransactions.map(t => {
+         const sourceName = accounts.find(a => a.id === t.accountId)?.name || 'Direct';
+         const destName = t.destinationAccountId ? (accounts.find(a => a.id === t.destinationAccountId)?.name || '') : '';
+
+         return {
+            'REFERENCE ID': t.id,
+            'DATE & TIME': formatDateTime(t.date),
+            'TYPE': t.type,
+            'MAIN CATEGORY': t.mainCategory || 'N/A',
+            'SUB CATEGORY': t.category || 'N/A',
+            'DESCRIPTION': t.description,
+            'SOURCE NODE': sourceName,
+            'DESTINATION NODE': destName,
+            'VALUE (RS.)': Number(t.amount),
+            'T-TYPE': (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || (t.type === 'TRANSFER' && t.destinationAccountId === 'cash')) ? 'INFLOW' : 'OUTFLOW'
+         };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Finance Audit Trail");
+
+      // Format column widths
+      const widths = [
+         { wch: 22 }, // Ref ID
+         { wch: 20 }, // Date
+         { wch: 15 }, // Type
+         { wch: 15 }, // Main Cat
+         { wch: 15 }, // Sub Cat
+         { wch: 40 }, // Description
+         { wch: 20 }, // Source
+         { wch: 20 }, // Dest
+         { wch: 15 }, // Value
+         { wch: 10 }  // T-Type
+      ];
+      worksheet['!cols'] = widths;
+
+      XLSX.writeFile(workbook, `PRASAMA_FINANCE_AUDIT_${startDate}_TO_${endDate}.xlsx`);
+   };
+
+   const renderDescription = (desc: string) => {
+      if (!desc) return null;
+      const poMatch = desc.match(/PO-[A-Z0-9]+/i);
+      if (poMatch && onJumpTo) {
+         const poId = poMatch[0];
+         const parts = desc.split(new RegExp(poId, 'i'));
+         return (
+            <>
+               {parts[0]}
+               <span
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     onJumpTo('PO', poId.toUpperCase());
+                  }}
+                  className="text-indigo-600 hover:text-indigo-800 cursor-pointer font-bold underline decoration-dotted underline-offset-2"
+               >
+                  {poId.toUpperCase()}
+               </span>
+               {parts[1]}
+            </>
+         );
+      }
+      return desc;
    };
 
    return (
@@ -251,7 +338,6 @@ const Finance: React.FC<FinanceProps> = ({
             </div>
 
             <div className="flex flex-wrap gap-4 items-center">
-               {/* Date Range Filter */}
                <div className="flex gap-3 items-center">
                   <div className="relative">
                      <input
@@ -293,11 +379,11 @@ const Finance: React.FC<FinanceProps> = ({
                   setExpAmount('');
                   setExpDesc('');
                   setExpCategory('');
-                  setExpCategory('');
                   setExpMainCategory('');
                   setExpSource('cash');
                   setExpIsLoan(false);
                   setExpCustomerId('');
+                  setExpDate(today);
                   setShowExpenseModal(true);
                }} className="bg-rose-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-200">Record Expense</button>
 
@@ -317,8 +403,6 @@ const Finance: React.FC<FinanceProps> = ({
             </div>
          </header>
 
-         {/* Financial Health Snapshot */}
-         {/* Financial Health Snapshot */}
          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
                <div className="absolute -right-4 -top-4 w-24 h-24 bg-slate-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -340,13 +424,19 @@ const Finance: React.FC<FinanceProps> = ({
             </div>
          </div>
 
-         {/* Ledger Audit Table */}
          <div className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
             <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-slate-50/20">
                <h3 className="font-black text-slate-900 uppercase tracking-tighter text-xs">
                   {filterActive ? `Expenses: ${startDate} to ${endDate}` : "Today's Audit Trail"}
                </h3>
-               <div className="flex gap-4">
+               <div className="flex gap-4 items-center">
+                  <button
+                     onClick={handleExportExcel}
+                     className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/10 active:scale-95 group"
+                  >
+                     <span className="text-sm group-hover:bounce">📥</span>
+                     DOWNLOAD EXCEL
+                  </button>
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{filteredTransactions.length} ENTRIES RECORDED</span>
                </div>
             </div>
@@ -354,60 +444,68 @@ const Finance: React.FC<FinanceProps> = ({
                <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-400">
                      <tr>
-                        <th className="px-6 py-3 font-black uppercase tracking-widest text-[9px] align-bottom">
-                           Operation / Entity
+                        <th className="px-6 py-6 font-black uppercase tracking-widest text-[9px] align-top">
+                           <div className="flex justify-between items-center mb-2">
+                              <span>Operation / Entity</span>
+                              {filterEntity && <button onClick={() => setFilterEntity('')} className="text-indigo-500 hover:text-indigo-700">Clear</button>}
+                           </div>
                            <input
-                              className="mt-2 w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[9px] text-slate-900 outline-none focus:border-indigo-500 uppercase"
-                              placeholder="Filter..."
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-[10px] text-slate-900 outline-none focus:border-indigo-500 uppercase placeholder:text-slate-300 shadow-sm transition-all"
+                              placeholder="Search anything..."
                               value={filterEntity}
                               onChange={e => setFilterEntity(e.target.value)}
                            />
                         </th>
-                        <th className="px-6 py-3 font-black uppercase tracking-widest text-[9px] text-center align-bottom">
-                           Protocol
-                           <input
-                              className="mt-2 w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[9px] text-slate-900 outline-none focus:border-indigo-500 uppercase text-center"
-                              placeholder="Type..."
+                        <th className="px-6 py-6 font-black uppercase tracking-widest text-[9px] text-center align-top">
+                           <div className="mb-2">Protocol</div>
+                           <select
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-[10px] text-slate-900 outline-none focus:border-indigo-500 uppercase shadow-sm transition-all cursor-pointer appearance-none text-center"
                               value={filterProtocol}
                               onChange={e => setFilterProtocol(e.target.value)}
-                           />
+                              style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%2364748b%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22m6 9 6 6 6-6%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+                           >
+                              <option value="">All Types</option>
+                              <option value="SALE">Sales</option>
+                              <option value="EXPENSE">Expenses</option>
+                              <option value="TRANSFER">Transfers</option>
+                              <option value="CREDIT_PAYMENT">Payments (In)</option>
+                              <option value="PURCHASE">Purchases (Stock)</option>
+                              <option value="LOAN_GIVEN">Loans Issued</option>
+                           </select>
                         </th>
-                        <th className="px-6 py-3 font-black uppercase tracking-widest text-[9px] align-bottom">
-                           Source Node
-                           <input
-                              className="mt-2 w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[9px] text-slate-900 outline-none focus:border-indigo-500 uppercase"
-                              placeholder="Account..."
+                        <th className="px-6 py-6 font-black uppercase tracking-widest text-[9px] align-top">
+                           <div className="mb-2">Source Node</div>
+                           <select
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-[10px] text-slate-900 outline-none focus:border-indigo-500 uppercase shadow-sm transition-all cursor-pointer appearance-none"
                               value={filterSource}
                               onChange={e => setFilterSource(e.target.value)}
-                           />
+                              style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%2364748b%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22m6 9 6 6 6-6%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+                           >
+                              <option value="">All Accounts</option>
+                              <option value="Direct">Direct Cash</option>
+                              {accounts.map(a => (
+                                 <option key={a.id} value={a.name}>{a.name}</option>
+                              ))}
+                           </select>
                         </th>
-                        <th className="px-6 py-3 font-black uppercase tracking-widest text-[9px] text-right align-bottom">Value (Rs.)</th>
+                        <th className="px-6 py-6 font-black uppercase tracking-widest text-[9px] text-right align-top pt-8">Value (Rs.)</th>
+                        <th className="px-6 py-6 font-black uppercase tracking-widest text-[9px] text-center align-top pt-8">Action</th>
                      </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                      {filteredTransactions.length > 0 ? filteredTransactions.map(t => (
                         <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
                            <td className="px-3 py-2">
-                              <div className="flex items-center justify-between gap-4">
-                                 <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-baseline gap-2">
-                                       <p className="font-black text-slate-900 uppercase text-[11px] leading-none tracking-tight truncate max-w-[300px] xl:max-w-none">
-                                          {t.description}
-                                       </p>
-                                       <p className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter font-bold whitespace-nowrap opacity-60 leading-none">
-                                          {t.id} <span className="mx-1">|</span> {new Date(t.date).toLocaleString()}
-                                       </p>
-                                    </div>
-                                    {t.category && <span className="block text-[9px] font-bold text-indigo-500 leading-none">{t.mainCategory ? `${t.mainCategory} > ` : ''}{t.category}</span>}
+                              <div className="flex flex-col gap-0.5">
+                                 <div className="flex items-baseline gap-2">
+                                    <p className="font-black text-slate-900 uppercase text-[11px] leading-none tracking-tight truncate max-w-[300px] xl:max-w-none">
+                                       {renderDescription(t.description)}
+                                    </p>
+                                    <p className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter font-bold whitespace-nowrap opacity-60 leading-none">
+                                       {t.id} <span className="mx-1">|</span> {new Date(t.date).toLocaleString()}
+                                    </p>
                                  </div>
-                                 {t.type === 'EXPENSE' && (
-                                    <button
-                                       onClick={() => openEditExpense(t)}
-                                       className="text-[9px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
-                                    >
-                                       ✏️ EDIT
-                                    </button>
-                                 )}
+                                 {t.category && <span className="block text-[9px] font-bold text-indigo-500 leading-none">{t.mainCategory ? `${t.mainCategory} > ` : ''}{t.category}</span>}
                               </div>
                            </td>
                            <td className="px-3 py-2 text-center whitespace-nowrap">
@@ -435,10 +533,35 @@ const Finance: React.FC<FinanceProps> = ({
                                  {t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' ? '+' : t.type === 'TRANSFER' ? '•' : '-'} Rs. {Number(t.amount).toLocaleString()}
                               </p>
                            </td>
+                           <td className="px-3 py-2 text-center">
+                              <div className="flex justify-center gap-2">
+                                 <button
+                                    onClick={() => {
+                                       if (t.type === 'SALE') onResumeDraft(t);
+                                       else openEditExpense(t);
+                                    }}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                    title="Edit Entry"
+                                 >
+                                    ✏️
+                                 </button>
+                                 <button
+                                    onClick={() => {
+                                       if (confirm("CRITICAL: Delete this transaction? This will reverse all linked accounting impacts.")) {
+                                          onDeleteTransaction(t.id);
+                                       }
+                                    }}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white transition-all shadow-sm"
+                                    title="Delete Entry"
+                                 >
+                                    🗑️
+                                 </button>
+                              </div>
+                           </td>
                         </tr>
                      )) : (
                         <tr>
-                           <td colSpan={4} className="px-10 py-32 text-center">
+                           <td colSpan={5} className="px-10 py-32 text-center">
                               <div className="opacity-10 text-6xl mb-4 grayscale">💰</div>
                               <p className="text-slate-300 font-black uppercase tracking-[0.4em] text-[10px]">Zero commercial activity recorded for this period</p>
                            </td>
@@ -449,7 +572,6 @@ const Finance: React.FC<FinanceProps> = ({
             </div>
          </div>
 
-         {/* Expense Modal */}
          {/* Expense Modal */}
          {showExpenseModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
@@ -470,6 +592,7 @@ const Finance: React.FC<FinanceProps> = ({
                         setExpMainCategory('');
                         setExpIsLoan(false);
                         setExpCustomerId('');
+                        setExpDate(today);
                      }} className="text-slate-300 hover:text-slate-900 text-2xl leading-none">&times;</button>
                   </div>
                   <form onSubmit={handleExpenseSubmit} className="p-5 space-y-3 overflow-y-auto">
@@ -478,6 +601,10 @@ const Finance: React.FC<FinanceProps> = ({
                         <select value={expSource} onChange={e => setExpSource(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white outline-none focus:border-indigo-500">
                            {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name} (Rs. {acc.balance.toLocaleString()})</option>)}
                         </select>
+                     </div>
+                     <div className="space-y-0.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Entry Date</label>
+                        <input type="date" className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white outline-none focus:border-indigo-500" value={expDate} onChange={e => setExpDate(e.target.value)} />
                      </div>
                      <div className="space-y-0.5">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Amount (Rs.)</label>
@@ -586,7 +713,6 @@ const Finance: React.FC<FinanceProps> = ({
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-12 custom-scrollbar flex flex-col lg:flex-row gap-12">
-                     {/* Current Accounts List */}
                      <div className="flex-1 space-y-4">
                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-b border-slate-100 pb-2">Active Linked Accounts</h4>
                         <div className="space-y-3">
@@ -620,7 +746,6 @@ const Finance: React.FC<FinanceProps> = ({
                         </div>
                      </div>
 
-                     {/* Add New Account Form */}
                      <div className="w-full lg:w-80 space-y-6">
                         <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-b border-slate-100 pb-2">Link New Account</h4>
                         <form onSubmit={handleAccountSubmit} className="space-y-4">

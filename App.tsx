@@ -23,6 +23,7 @@ import Settings from './components/Settings';
 import Login from './components/Login';
 import Accounting from './components/Accounting';
 import KPI from './components/KPI';
+import Reload from './components/Reload';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -227,6 +228,14 @@ const App: React.FC = () => {
 
   const handleCompleteSale = async (tx: Transaction) => {
     try {
+      // Check if we are updating an existing COMPLETED transaction
+      const existingTx = transactions.find(t => t.id === tx.id);
+      if (existingTx && existingTx.status === 'COMPLETED') {
+        const updatedTx = { ...tx, status: 'COMPLETED' as const };
+        await handleUpdateGlobalTransaction(updatedTx);
+        return;
+      }
+
       // FIX: Map pseudo 'LOCAL NODE' to real 'CASHIER 1' for consistency
       const rawBranch = (tx.branchId || userProfile.branch || 'CASHIER 1').toUpperCase().trim();
       const activeBranch = (rawBranch === 'LOCAL NODE' || rawBranch === 'BOOKSHOP' || rawBranch === 'SHOP 2' || rawBranch === 'MAIN BRANCH' || !rawBranch) ? 'CASHIER 1' : rawBranch;
@@ -342,95 +351,156 @@ const App: React.FC = () => {
     }
 
     // 1. Customer Credit Delta (Crucial for Settlement Tracking)
-    if (oldTx.customerId) {
-      const customer = customers.find(c => c.id === oldTx.customerId);
-      if (customer) {
-        let oldCreditValue = oldTx.paymentMethod === 'CREDIT' ? Number(oldTx.amount) : (Number(oldTx.balanceDue) || 0);
-        let newCreditValue = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
+    if (oldTx.customerId || tx.customerId) {
+      // Handle Customer Change
+      if (oldTx.customerId && oldTx.customerId !== tx.customerId) {
+        const oldCustomer = customers.find(c => c.id === oldTx.customerId);
+        if (oldCustomer) {
+          let oldCreditValue = oldTx.paymentMethod === 'CREDIT' ? Number(oldTx.amount) : (Number(oldTx.balanceDue) || 0);
+          if (oldTx.type === 'CREDIT_PAYMENT') oldCreditValue = -Number(oldTx.amount);
+          await upsertDocument(dbCols.customers, oldCustomer.id, {
+            ...oldCustomer,
+            totalCredit: (Number(oldCustomer.totalCredit) || 0) - oldCreditValue
+          });
+        }
+      }
 
-        if (oldTx.type === 'CREDIT_PAYMENT') {
-          oldCreditValue = -Number(oldTx.amount);
-          newCreditValue = -Number(tx.amount);
+      const currentCustomer = customers.find(c => c.id === tx.customerId);
+      if (currentCustomer) {
+        let oldCreditValue = 0;
+        if (oldTx.customerId === tx.customerId) {
+          oldCreditValue = oldTx.paymentMethod === 'CREDIT' ? Number(oldTx.amount) : (Number(oldTx.balanceDue) || 0);
+          if (oldTx.type === 'CREDIT_PAYMENT') oldCreditValue = -Number(oldTx.amount);
         }
 
+        let newCreditValue = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
+        if (tx.type === 'CREDIT_PAYMENT') newCreditValue = -Number(tx.amount);
+
         const diff = newCreditValue - oldCreditValue;
-        await upsertDocument(dbCols.customers, customer.id, {
-          ...customer,
-          totalCredit: (Number(customer.totalCredit) || 0) + diff
+        await upsertDocument(dbCols.customers, currentCustomer.id, {
+          ...currentCustomer,
+          totalCredit: (Number(currentCustomer.totalCredit) || 0) + diff
         });
       }
     }
 
     // 2. Vendor Balance Delta
-    if (oldTx.vendorId) {
-      const vendor = vendors.find(v => v.id === oldTx.vendorId);
-      if (vendor) {
-        let vDiff = 0;
-        if (oldTx.type === 'PURCHASE') {
-          vDiff = (Number(tx.amount) || 0) - (Number(oldTx.amount) || 0);
-        } else if (oldTx.type === 'CREDIT_PAYMENT') {
-          vDiff = (Number(oldTx.amount) || 0) - (Number(tx.amount) || 0);
+    if (oldTx.vendorId || tx.vendorId) {
+      // Handle Vendor Change
+      if (oldTx.vendorId && oldTx.vendorId !== tx.vendorId) {
+        const oldVendor = vendors.find(v => v.id === oldTx.vendorId);
+        if (oldVendor) {
+          let oldImpact = 0;
+          if (oldTx.type === 'PURCHASE' && !oldTx.id.startsWith('PU-')) oldImpact = Number(oldTx.amount);
+          else if (oldTx.type === 'CREDIT_PAYMENT') oldImpact = -Number(oldTx.amount);
+
+          await upsertDocument(dbCols.vendors, oldVendor.id, {
+            ...oldVendor,
+            totalBalance: (Number(oldVendor.totalBalance) || 0) - oldImpact
+          });
         }
-        await upsertDocument(dbCols.vendors, vendor.id, {
-          ...vendor,
-          totalBalance: (Number(vendor.totalBalance) || 0) + vDiff
-        });
+      }
+
+      const currentVendor = vendors.find(v => v.id === tx.vendorId);
+      if (currentVendor) {
+        let oldImpact = 0;
+        if (oldTx.vendorId === tx.vendorId) {
+          // FIX: Only impact vendor balance if it was a CREDIT purchase or a SETTLEMENT
+          if (oldTx.type === 'PURCHASE' && !oldTx.id.startsWith('PU-') && oldTx.paymentMethod === 'CREDIT') oldImpact = Number(oldTx.amount);
+          else if (oldTx.type === 'CREDIT_PAYMENT') oldImpact = -Number(oldTx.amount);
+        }
+
+        let newImpact = 0;
+        if (tx.type === 'PURCHASE' && !tx.id.startsWith('PU-') && tx.paymentMethod === 'CREDIT') newImpact = Number(tx.amount);
+        else if (tx.type === 'CREDIT_PAYMENT') newImpact = -Number(tx.amount);
+
+        const vDiff = newImpact - oldImpact;
+        if (vDiff !== 0) {
+          await upsertDocument(dbCols.vendors, currentVendor.id, {
+            ...currentVendor,
+            totalBalance: (Number(currentVendor.totalBalance) || 0) + vDiff
+          });
+        }
       }
     }
 
     // 3. Bank/Cash Account Balance Delta
-    if (oldTx.accountId) {
-      const acc = accounts.find(a => a.id === oldTx.accountId);
-      if (acc) {
-        const isOutflow = ['PURCHASE', 'EXPENSE', 'CREDIT_PAYMENT'].includes(oldTx.type);
-        let aDiff = 0;
-        if (isOutflow) {
-          aDiff = (Number(oldTx.amount) || 0) - (Number(tx.amount) || 0);
-        } else {
-          const oldInflow = Number(oldTx.paidAmount) || (oldTx.paymentMethod !== 'CREDIT' ? Number(oldTx.amount) : 0);
-          const newInflow = Number(tx.paidAmount) || (tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
-          aDiff = newInflow - oldInflow;
+    if (oldTx.accountId || tx.accountId) {
+      // if account changed, restore old and deduct new
+      if (oldTx.accountId && oldTx.accountId !== tx.accountId) {
+        const oldAcc = accounts.find(a => a.id === oldTx.accountId);
+        if (oldAcc) {
+          const isOutflow = ['PURCHASE', 'EXPENSE', 'CREDIT_PAYMENT'].includes(oldTx.type);
+          const inflow = Number(oldTx.paidAmount) || (oldTx.paymentMethod !== 'CREDIT' ? Number(oldTx.amount) : 0);
+          const restoreAmount = isOutflow ? Number(oldTx.amount) : -inflow;
+          await upsertDocument(dbCols.accounts, oldAcc.id, { ...oldAcc, balance: Number(oldAcc.balance) + restoreAmount });
         }
-        await upsertDocument(dbCols.accounts, acc.id, {
-          ...acc,
-          balance: Number(acc.balance) + aDiff
+      }
+
+      const currentAcc = accounts.find(a => a.id === tx.accountId);
+      if (currentAcc) {
+        let oldBalDiff = 0;
+        if (oldTx.accountId === tx.accountId) {
+          const isOutflow = ['PURCHASE', 'EXPENSE', 'CREDIT_PAYMENT'].includes(oldTx.type);
+          // FIX: For purchases, only outflow if NOT credit
+          let oldAmountToDeduct = 0;
+          if (oldTx.type === 'PURCHASE') {
+            oldAmountToDeduct = (oldTx.paymentMethod !== 'CREDIT') ? Number(oldTx.amount) : 0;
+          } else if (oldTx.type === 'EXPENSE' || oldTx.type === 'CREDIT_PAYMENT') {
+            oldAmountToDeduct = Number(oldTx.amount);
+          }
+
+          const inflow = Number(oldTx.paidAmount) || (oldTx.type === 'SALE' && oldTx.paymentMethod !== 'CREDIT' ? Number(oldTx.amount) : 0);
+          oldBalDiff = isOutflow ? -oldAmountToDeduct : inflow;
+        }
+
+        const isOutflowNew = ['PURCHASE', 'EXPENSE', 'CREDIT_PAYMENT'].includes(tx.type);
+        let newAmountToDeduct = 0;
+        if (tx.type === 'PURCHASE') {
+          newAmountToDeduct = (tx.paymentMethod !== 'CREDIT') ? Number(tx.amount) : 0;
+        } else if (tx.type === 'EXPENSE' || tx.type === 'CREDIT_PAYMENT') {
+          newAmountToDeduct = Number(tx.amount);
+        }
+
+        const inflowNew = Number(tx.paidAmount) || (tx.type === 'SALE' && tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
+        const newBalDiff = isOutflowNew ? -newAmountToDeduct : inflowNew;
+
+        await upsertDocument(dbCols.accounts, currentAcc.id, {
+          ...currentAcc,
+          balance: Number(currentAcc.balance) + (newBalDiff - oldBalDiff)
         });
       }
     }
 
     // 4. Stock Adjustment for SALE transactions
-    if (oldTx.type === 'SALE' && oldTx.items && tx.items) {
+    if ((oldTx.type === 'SALE' || tx.type === 'SALE') && (oldTx.items || tx.items)) {
       const activeBranch = userProfile.branch;
       const stockBranch = getStockBranch(activeBranch);
 
-      // Calculate net stock changes per product
       const stockChanges = new Map<string, number>();
 
-      // Add back old quantities/values
-      for (const oldItem of oldTx.items) {
-        const product = products.find(p => p.id === oldItem.productId);
-        const productCategory = categories.find(c => c.id === product?.categoryId);
-        const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-          (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-
-        const amountToRestore = isReload ? (Number(oldItem.price) * Number(oldItem.quantity) * 0.96) : Number(oldItem.quantity);
-        const current = stockChanges.get(oldItem.productId) || 0;
-        stockChanges.set(oldItem.productId, current + amountToRestore);
+      if (oldTx.type === 'SALE' && oldTx.items) {
+        for (const oldItem of oldTx.items) {
+          const product = products.find(p => p.id === oldItem.productId);
+          const productCategory = categories.find(c => c.id === product?.categoryId);
+          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
+            (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+          const amountToRestore = isReload ? (Number(oldItem.price) * Number(oldItem.quantity) * 0.96) : Number(oldItem.quantity);
+          stockChanges.set(oldItem.productId, (stockChanges.get(oldItem.productId) || 0) + amountToRestore);
+        }
       }
 
-      // Subtract new quantities/values
-      for (const newItem of tx.items) {
-        const product = products.find(p => p.id === newItem.productId);
-        const productCategory = categories.find(c => c.id === product?.categoryId);
-        const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-          (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-
-        const amountToDeduct = isReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
-        const current = stockChanges.get(newItem.productId) || 0;
-        stockChanges.set(newItem.productId, current - amountToDeduct);
+      if (tx.type === 'SALE' && tx.items) {
+        for (const newItem of tx.items) {
+          const product = products.find(p => p.id === newItem.productId);
+          const productCategory = categories.find(c => c.id === product?.categoryId);
+          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
+            (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+          const amountToDeduct = isReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
+          stockChanges.set(newItem.productId, (stockChanges.get(newItem.productId) || 0) - amountToDeduct);
+        }
       }
 
-      // Apply net changes to each product
       for (const [productId, netChange] of stockChanges.entries()) {
         if (netChange !== 0) {
           const product = products.find(p => p.id === productId);
@@ -440,9 +510,7 @@ const App: React.FC = () => {
             const productCategory = categories.find(c => c.id === product.categoryId);
             const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
               (product.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-
             bStocks[stockBranch] = isReload ? (Number(currentStock) + netChange) : Math.max(0, Number(currentStock) + netChange);
-
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
@@ -455,6 +523,73 @@ const App: React.FC = () => {
 
     await upsertDocument(dbCols.transactions, tx.id, sanitizeData(tx));
   };
+
+  const handleResyncBalances = async () => {
+    setIsRestoring(true);
+    setRestorationPhase('Auditing Ledger Streams...');
+    try {
+      // 1. Recalculate Vendor Balances
+      for (const vendor of vendors) {
+        // THE GOLD STANDARD: Balance = (Credit POs sum) + (Manual Credit Purchases sum) - (Settlements sum)
+        // FIX: Only include POs with paymentMethod 'CREDIT'
+        const vendorPOs = purchaseOrders.filter(po => po.vendorId === vendor.id && po.status !== 'DRAFT' && po.paymentMethod === 'CREDIT');
+        const vendorTxs = transactions.filter(t => t.vendorId === vendor.id);
+
+        const totalBookedPO = vendorPOs.reduce((sum, po) => sum + Number(po.totalAmount), 0);
+
+        // Manual purchases are Those that are NOT from the PO system.
+        // FIX: Only include transactions with paymentMethod 'CREDIT'
+        const totalManualPurchases = vendorTxs
+          .filter(t =>
+            t.type === 'PURCHASE' &&
+            !t.id.startsWith('PU-') &&
+            !t.description?.includes('PO-') &&
+            !t.description?.includes('Stock Received') &&
+            t.paymentMethod === 'CREDIT'
+          )
+          .reduce((sum, t) => sum + Number(t.amount), 0);
+
+        const totalSettled = vendorTxs
+          .filter(t => t.type === 'CREDIT_PAYMENT')
+          .reduce((sum, t) => sum + Number(t.amount), 0);
+
+        const newBalance = (totalBookedPO + totalManualPurchases) - totalSettled;
+        if (Math.abs(Number(vendor.totalBalance || 0) - newBalance) > 0.1) {
+          await upsertDocument(dbCols.vendors, vendor.id, { ...vendor, totalBalance: newBalance });
+        }
+      }
+
+      // 2. Recalculate Customer Balances
+      for (const customer of customers) {
+        const customerTxs = transactions.filter(t => t.customerId === customer.id && t.status !== 'DRAFT');
+
+        let totalCredit = 0;
+        customerTxs.forEach(t => {
+          if (t.type === 'SALE' || t.type === 'LOAN_GIVEN' || t.type === 'SALE_HISTORY_IMPORT') {
+            const amount = t.paymentMethod === 'CREDIT' ? Number(t.amount) : (Number(t.balanceDue) || 0);
+            totalCredit += amount;
+          } else if (t.type === 'CREDIT_PAYMENT') {
+            // Only deduct from total credit if the payment is NOT linked 
+            // (Linked payments already reduce the balanceDue of the parent SALE)
+            if (!t.parentTxId) {
+              totalCredit -= Number(t.amount);
+            }
+          }
+        });
+
+        if (Math.abs(Number(customer.totalCredit || 0) - totalCredit) > 0.1) {
+          await upsertDocument(dbCols.customers, customer.id, { ...customer, totalCredit });
+        }
+      }
+
+      alert("Ledger Audit Complete. All balances have been synchronized with the transaction stream.");
+    } catch (err: any) {
+      alert("Resync Failed: " + err.message);
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
 
   const handleDeleteGlobalTransaction = async (id: string) => {
     const tx = transactions.find(t => t.id === id);
@@ -485,12 +620,16 @@ const App: React.FC = () => {
       const vendor = vendors.find(v => v.id === tx.vendorId);
       if (vendor) {
         let vDiff = 0;
-        if (tx.type === 'PURCHASE') vDiff = -Number(tx.amount);
+        // FIX: Only reverse if it was a CREDIT purchase or a SETTLEMENT
+        if (tx.type === 'PURCHASE' && !tx.id.startsWith('PU-') && tx.paymentMethod === 'CREDIT') vDiff = -Number(tx.amount);
         else if (tx.type === 'CREDIT_PAYMENT') vDiff = Number(tx.amount);
-        await upsertDocument(dbCols.vendors, vendor.id, {
-          ...vendor,
-          totalBalance: (Number(vendor.totalBalance) || 0) + vDiff
-        });
+
+        if (vDiff !== 0) {
+          await upsertDocument(dbCols.vendors, vendor.id, {
+            ...vendor,
+            totalBalance: (Number(vendor.totalBalance) || 0) + vDiff
+          });
+        }
       }
     }
 
@@ -498,9 +637,23 @@ const App: React.FC = () => {
     if (tx.accountId) {
       const acc = accounts.find(a => a.id === tx.accountId);
       if (acc) {
-        const isOutflow = ['PURCHASE', 'EXPENSE', 'CREDIT_PAYMENT'].includes(tx.type);
-        const inflow = Number(tx.paidAmount) || (tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
-        const aDiff = isOutflow ? Number(tx.amount) : -inflow;
+        // Determine if the original transaction was an outflow or inflow
+        // Purchases, Expenses, and Vendor Settlements are outflows.
+        // Sales and Customer Settlements are inflows.
+        const isOutflow = ['PURCHASE', 'EXPENSE'].includes(tx.type) || (tx.type === 'CREDIT_PAYMENT' && tx.vendorId);
+
+        let amountToRestore = 0;
+        if (tx.type === 'PURCHASE') {
+          amountToRestore = (tx.paymentMethod !== 'CREDIT') ? Number(tx.amount) : 0;
+        } else if (tx.type === 'EXPENSE' || tx.type === 'CREDIT_PAYMENT') {
+          amountToRestore = Number(tx.amount);
+        }
+
+        const inflow = Number(tx.paidAmount) || (tx.type === 'SALE' && tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
+
+        // If it was an outflow, we ADD back (restore). If it was an inflow, we SUBTRACT (reverse).
+        const aDiff = isOutflow ? amountToRestore : -inflow;
+
         await upsertDocument(dbCols.accounts, acc.id, {
           ...acc,
           balance: Number(acc.balance) + aDiff
@@ -508,7 +661,7 @@ const App: React.FC = () => {
       }
     }
 
-    // 4. Restore Stock for SALE transactions
+    // 4. Restore/Deduct Stock
     if (tx.type === 'SALE' && tx.items) {
       const activeBranch = userProfile.branch;
       const stockBranch = getStockBranch(activeBranch);
@@ -532,6 +685,28 @@ const App: React.FC = () => {
             branchStocks: bStocks,
             stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0)
           });
+        }
+      }
+    } else if (tx.type === 'PURCHASE') {
+      const poId = tx.description?.match(/PO-[A-Z0-9]+/i)?.[0] || tx.description?.split(': ').pop();
+      const po = purchaseOrders.find(p => p.id === poId);
+      if (po && po.items) {
+        const activeBranch = userProfile.branch;
+        const stockBranch = getStockBranch(activeBranch);
+
+        for (const item of po.items) {
+          const product = products.find(p => p.id === item.productId);
+          if (product) {
+            const bStocks = { ...(product.branchStocks || {}) };
+            const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
+            bStocks[stockBranch] = Number(currentStock) - (Number(item.quantity) + (Number(item.freeQuantity) || 0));
+
+            await upsertDocument(dbCols.products, product.id, {
+              ...product,
+              branchStocks: bStocks,
+              stock: (Object.values(bStocks) as number[]).reduce((a, b: any) => a + b, 0)
+            });
+          }
         }
       }
     }
@@ -637,6 +812,16 @@ const App: React.FC = () => {
     const po = purchaseOrders.find(p => p.id === poId);
     if (!po || po.status !== 'PENDING') return;
 
+    // VITAL SAFETY CHECK: Prevent double-receiving if a transaction already exists for this PO
+    const existingTx = transactions.find(t =>
+      (t.description?.includes(poId) && t.id.startsWith('PU-')) ||
+      (t.type === 'PURCHASE' && t.description?.includes(poId))
+    );
+    if (existingTx) {
+      alert(`SYSTEM ALERT: A stock receipt transaction for PO ${poId} already exists in the ledger (${existingTx.id}). To prevent duplicate stock, this action has been blocked. If you need to re-receive, please delete the old transaction first.`);
+      return;
+    }
+
     const updatedPO: PurchaseOrder = {
       ...po,
       status: 'RECEIVED' as POStatus,
@@ -648,11 +833,11 @@ const App: React.FC = () => {
     const stockBranch = getStockBranch(activeBranch);
 
     for (const item of po.items) {
-      const product = products.find(p => p.id === item.productId);
+      const product = products.find(p => p.id === item.productId) || products.find(p => p.name === item.productId);
       if (product) {
         const bStocks = { ...(product.branchStocks || {}) };
         const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-        bStocks[stockBranch] = Number(currentStock) + Number(item.quantity);
+        bStocks[stockBranch] = Number(currentStock) + Number(item.quantity) + (Number(item.freeQuantity) || 0);
 
         await upsertDocument(dbCols.products, product.id, {
           ...product,
@@ -670,33 +855,95 @@ const App: React.FC = () => {
       type: 'PURCHASE',
       amount: po.totalAmount,
       paymentMethod: po.paymentMethod,
-      accountId: po.accountId,
+      accountId: (po.paymentMethod === 'BANK' || po.paymentMethod === 'CARD' || po.paymentMethod === 'CHEQUE') ? po.accountId : (po.paymentMethod === 'CASH' ? 'cash' : null),
       vendorId: po.vendorId,
       branchId: activeBranch,
       description: `Stock Received against PO: ${po.id}`,
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate,
+      mainCategory: po.mainCategory,
+      category: po.category,
       updatedAt: new Date().toISOString()
     });
     await upsertDocument(dbCols.transactions, txId, normalizedTx);
 
-    if (po.paymentMethod === 'CREDIT') {
+    // VITAL FIX: If it's a CASH purchase, deduct from account balance immediately
+    if (po.paymentMethod !== 'CREDIT') {
+      const accId = normalizedTx.accountId;
+      if (accId) {
+        const acc = accounts.find(a => a.id === accId);
+        if (acc) {
+          await upsertDocument(dbCols.accounts, acc.id, {
+            ...acc,
+            balance: Number(acc.balance) - Number(po.totalAmount)
+          });
+        }
+      }
+    }
+
+  };
+
+  const handleUpsertPO = async (po: PurchaseOrder) => {
+    const oldPO = purchaseOrders.find(p => p.id === po.id);
+    await upsertDocument(dbCols.purchaseOrders, po.id, po);
+
+    // Manage Balance Impact of PO commitment
+    // FIX: Updates balance if PO was CREDIT or becomes CREDIT (Correct Ledger Logic)
+    const vendorId = po.vendorId || oldPO?.vendorId;
+    if (vendorId) {
+      // 1. Handle Vendor Change: Revert impact on OLD vendor
+      if (oldPO && oldPO.vendorId && oldPO.vendorId !== vendorId && oldPO.paymentMethod === 'CREDIT' && oldPO.status !== 'DRAFT') {
+        const oldVendor = vendors.find(v => v.id === oldPO.vendorId);
+        if (oldVendor) {
+          await upsertDocument(dbCols.vendors, oldVendor.id, {
+            ...oldVendor,
+            totalBalance: (Number(oldVendor.totalBalance) || 0) - Number(oldPO.totalAmount)
+          });
+        }
+      }
+
+      // 2. Handle Current Vendor Impact (Diff Logic)
+      const vendor = vendors.find(v => v.id === vendorId);
+      if (vendor) {
+        // Calculate Net Effect on the ACTIVE vendor
+        // FIX: Only impact if paymentMethod is 'CREDIT'
+        const oldAmount = (oldPO && oldPO.status !== 'DRAFT' && oldPO.vendorId === vendorId && oldPO.paymentMethod === 'CREDIT') ? Number(oldPO.totalAmount) : 0;
+        const newAmount = (po.status !== 'DRAFT' && po.vendorId === vendorId && po.paymentMethod === 'CREDIT') ? Number(po.totalAmount) : 0;
+        const diff = newAmount - oldAmount;
+
+        if (diff !== 0) {
+          await upsertDocument(dbCols.vendors, vendor.id, {
+            ...vendor,
+            totalBalance: (Number(vendor.totalBalance) || 0) + diff
+          });
+        }
+      }
+    }
+  };
+
+  const handleDeletePO = async (id: string) => {
+    const po = purchaseOrders.find(p => p.id === id);
+    if (!po) return;
+
+    // 1. Reverse Financial Impact
+    // If it was RECEIVED, reverse the transaction (which also reverses stock/cash)
+    if (po.status === 'RECEIVED') {
+      const linkedTxs = transactions.filter(t => (t.description?.includes(id) && t.id.startsWith('PU-')) || (t.type === 'PURCHASE' && t.description?.includes(id)));
+      for (const tx of linkedTxs) {
+        await handleDeleteGlobalTransaction(tx.id);
+      }
+    } else if (po.status === 'PENDING' && po.paymentMethod === 'CREDIT' && po.vendorId) {
+      // If it was PENDING CREDIT, reverse the vendor debt
       const vendor = vendors.find(v => v.id === po.vendorId);
       if (vendor) {
         await upsertDocument(dbCols.vendors, vendor.id, {
           ...vendor,
-          totalBalance: (Number(vendor.totalBalance) || 0) + po.totalAmount
-        });
-      }
-    } else {
-      const acc = accounts.find(a => a.id === po.accountId);
-      if (acc) {
-        await upsertDocument(dbCols.accounts, acc.id, {
-          ...acc,
-          balance: Number(acc.balance) - po.totalAmount
+          totalBalance: (Number(vendor.totalBalance) || 0) - Number(po.totalAmount)
         });
       }
     }
+
+    await deleteDocument(dbCols.purchaseOrders, id);
   };
 
   const handleBulkUpsertProducts = async (productsToUpsert: Product[]) => {
@@ -927,7 +1174,7 @@ const App: React.FC = () => {
   const handleResumeDraft = (tx: Transaction) => {
     // Reconstruct POS Cart from Transaction Items
     const restoredCart = (tx.items || []).map(item => {
-      const product = products.find(p => p.id === item.productId);
+      const product = products.find(p => p.id === item.productId) || products.find(p => p.name === item.productId);
       // Fallback if product deleted, but usually safer to skip or placeholder
       if (!product) return null;
       return {
@@ -951,7 +1198,9 @@ const App: React.FC = () => {
       chequeNumber: tx.chequeNumber || '',
       chequeDate: tx.chequeDate || getLocalDateString(),
       isAdvance: false,
-      advanceAmount: 0
+      advanceAmount: 0,
+      transactionId: tx.id,
+      transactionDate: tx.date
     });
 
     // Switch to POS
@@ -1006,19 +1255,20 @@ const App: React.FC = () => {
           )}
           {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={transactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} onSaveDraftSale={handleSaveDraftSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
           {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} onConvertQuotation={handleConvertQuoteToSale} />}
-          {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} />}
+          {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} purchaseOrders={purchaseOrders} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} />}
           {currentView === 'INVENTORY' && <Inventory products={branchProducts} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = { id: `cat-${Date.now()}`, name: name.toUpperCase() }; upsertDocument(dbCols.categories, c.id, c); return c; }} onUpsertCategory={(cat) => upsertDocument(dbCols.categories, cat.id, cat)} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onBulkUpsertProducts={handleBulkUpsertProducts} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
           {
             currentView === 'FINANCE' && <Finance accounts={accounts} transactions={transactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} customers={customers} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={handleAddExpense} onAddTransfer={handleAddTransfer}
-              onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} onDeleteAccount={handleDeleteAccount} />
+              onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} onDeleteAccount={handleDeleteAccount} onResumeDraft={handleResumeDraft} onJumpTo={handleJumpTo} />
           }
           {currentView === 'CUSTOMERS' && <Customers jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} customers={customers} transactions={transactions} accounts={accounts} products={products} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onReceivePayment={handleCustomerPayment} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} />}
 
-          {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} syncStatus="OFFLINE" />}
+          {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} onResyncBalances={handleResyncBalances} syncStatus="OFFLINE" />}
           {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
           {currentView === 'CHEQUE_PRINT' && <ChequePrint vendors={vendors} />}
-          {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={(po) => upsertDocument(dbCols.purchaseOrders, po.id, po)} onReceivePO={handleReceivePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} />}
-          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} />}
+          {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={handleUpsertPO} onReceivePO={handleReceivePO} onDeletePO={handleDeletePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResyncBalances={handleResyncBalances} />}
+          {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
+          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} />}
 
         </div >
       </main >

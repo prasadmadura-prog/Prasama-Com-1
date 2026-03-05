@@ -23,7 +23,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategoryId, setFilterCategoryId] = useState('All');
-  
+
   const [settings, setSettings] = useState<PrintSettings>({
     labelSize: 'MEDIUM',
     columns: 3,
@@ -37,16 +37,16 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
-      const matchesSearch = (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = filterCategoryId === 'All' || p.categoryId === filterCategoryId;
       return matchesSearch && matchesCategory;
     });
   }, [products, searchTerm, filterCategoryId]);
 
-  const totalLabels = useMemo(() => 
+  const totalLabels = useMemo(() =>
     Object.values(selections).reduce((a: number, b: number) => a + b, 0)
-  , [selections]);
+    , [selections]);
 
   const updateSelection = (productId: string, copies: number) => {
     setSelections(prev => ({
@@ -111,7 +111,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             overflow: hidden;
             page-break-inside: avoid;
           }
-          .name { font-weight: 800; text-transform: uppercase; font-size: ${labelDim.f}; margin-bottom: 1mm; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+          .name { font-weight: 800; text-transform: uppercase; font-size: ${labelDim.f}; margin-bottom: 1mm; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.1; word-break: break-word; }
           .barcode-svg { max-width: 90%; height: auto; margin-top: 1mm; }
           .price { font-weight: 900; font-size: calc(${labelDim.f} + 2px); margin-top: 1.5mm; }
         </style>
@@ -123,7 +123,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
     itemsToPrint.forEach(p => {
       const count = selections[p.id];
-      for(let i=0; i<count; i++) {
+      for (let i = 0; i < count; i++) {
         html += `<div class="label">
           ${settings.showName ? `<div class="name">${p.name}</div>` : ''}
           <svg class="barcode-svg" 
@@ -152,7 +152,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
       </body>
       </html>
     `;
-    
+
     printWindow.document.write(html);
     printWindow.document.close();
   };
@@ -164,8 +164,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Barcode Terminal</h2>
           <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">Ready for {totalLabels} Output Units</p>
         </div>
-        <button 
-          onClick={handlePrint} 
+        <button
+          onClick={handlePrint}
           disabled={totalLabels === 0}
           className="bg-slate-900 text-white px-12 py-4 rounded-2xl font-black uppercase text-[11px] tracking-[0.2em] shadow-2xl hover:bg-black transition-all active:scale-95 disabled:opacity-20 flex items-center gap-3"
         >
@@ -186,9 +186,9 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Label Dimensions</label>
               <div className="grid grid-cols-3 gap-2">
                 {(['SMALL', 'MEDIUM', 'LARGE'] as LabelSize[]).map(s => (
-                  <button 
-                    key={s} 
-                    onClick={() => setSettings({...settings, labelSize: s})}
+                  <button
+                    key={s}
+                    onClick={() => setSettings({ ...settings, labelSize: s })}
                     className={`py-2.5 rounded-xl text-[9px] font-black uppercase transition-all border ${settings.labelSize === s ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300'}`}
                   >
                     {s}
@@ -201,9 +201,9 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Paper Standard</label>
               <div className="grid grid-cols-3 gap-2">
                 {(['A4', 'LETTER', 'ROLL'] as PaperSize[]).map(p => (
-                  <button 
-                    key={p} 
-                    onClick={() => setSettings({...settings, paperSize: p})}
+                  <button
+                    key={p}
+                    onClick={() => setSettings({ ...settings, paperSize: p })}
                     className={`py-2.5 rounded-xl text-[9px] font-black uppercase transition-all border ${settings.paperSize === p ? 'bg-slate-900 border-slate-900 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300'}`}
                   >
                     {p}
@@ -215,30 +215,30 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             <div className="grid grid-cols-2 gap-4 pt-2">
               <div>
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Cols per Row</label>
-                <input 
-                  type="number" 
-                  min="1" 
-                  max="10" 
-                  value={settings.columns} 
-                  onChange={e => setSettings({...settings, columns: parseInt(e.target.value) || 1})} 
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={settings.columns}
+                  onChange={e => setSettings({ ...settings, columns: parseInt(e.target.value) || 1 })}
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 font-black text-center text-indigo-600 outline-none focus:border-indigo-500"
                 />
               </div>
               <div className="flex flex-col justify-end gap-2">
-                <button 
-                  onClick={() => setSettings({...settings, showName: !settings.showName})}
+                <button
+                  onClick={() => setSettings({ ...settings, showName: !settings.showName })}
                   className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${settings.showName ? 'text-emerald-600' : 'text-slate-300'}`}
                 >
                   <span className="text-sm">{settings.showName ? '☑' : '☐'}</span> Name
                 </button>
-                <button 
-                  onClick={() => setSettings({...settings, showPrice: !settings.showPrice})}
+                <button
+                  onClick={() => setSettings({ ...settings, showPrice: !settings.showPrice })}
                   className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${settings.showPrice ? 'text-emerald-600' : 'text-slate-300'}`}
                 >
                   <span className="text-sm">{settings.showPrice ? '☑' : '☐'}</span> Price
                 </button>
-                <button 
-                  onClick={() => setSettings({...settings, showSKU: !settings.showSKU})}
+                <button
+                  onClick={() => setSettings({ ...settings, showSKU: !settings.showSKU })}
                   className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${settings.showSKU ? 'text-emerald-600' : 'text-slate-300'}`}
                 >
                   <span className="text-sm">{settings.showSKU ? '☑' : '☐'}</span> SKU
@@ -253,15 +253,15 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
               <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
-              <input 
-                type="text" 
-                placeholder="Search inventory assets..." 
-                className="w-full pl-14 pr-6 py-4 rounded-2xl border border-slate-200 outline-none bg-slate-50/50 font-bold text-sm focus:border-indigo-500 transition-all" 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Search inventory assets..."
+                className="w-full pl-14 pr-6 py-4 rounded-2xl border border-slate-200 outline-none bg-slate-50/50 font-bold text-sm focus:border-indigo-500 transition-all"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <select 
+            <select
               value={filterCategoryId}
               onChange={(e) => setFilterCategoryId(e.target.value)}
               className="px-8 py-4 rounded-2xl border border-slate-200 bg-white text-[10px] font-black uppercase tracking-widest outline-none cursor-pointer focus:border-indigo-500"
@@ -290,7 +290,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                       </td>
                       <td className="px-8 py-5">
                         <div className="flex items-center justify-center gap-4">
-                          <button 
+                          <button
                             onMouseDown={() => startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) - 1))}
                             onMouseUp={stopContinuousAction}
                             onMouseLeave={stopContinuousAction}
@@ -299,7 +299,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                             className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center font-black text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-all active:scale-90 shadow-sm"
                           >-</button>
                           <span className="w-10 text-center font-black text-slate-900 font-mono text-lg">{selections[p.id] || 0}</span>
-                          <button 
+                          <button
                             onMouseDown={() => startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) + 1))}
                             onMouseUp={stopContinuousAction}
                             onMouseLeave={stopContinuousAction}

@@ -114,7 +114,10 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     // Profit = (Non-Reload Revenue - Cost) + 4% of Reload Sales
     const profit = (revenue - todayCOGS) + (reloadSales * 0.04);
-    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+
+    // MATCH POS LOGIC: Revenue (Inflow) includes 4% of Reload Sales
+    const effectiveRevenue = revenue + (reloadSales * 0.04);
+    const margin = effectiveRevenue > 0 ? (profit / effectiveRevenue) * 100 : 0;
 
     // FIX: Sum opening balances for ALL sessions if filter is ALL
     const openingFloat = daySessions
@@ -138,13 +141,18 @@ const Dashboard: React.FC<DashboardProps> = ({
     ).reduce((acc, t) => acc + Number(t.amount || 0), 0);
 
     const todayCash = openingFloat + cashIn - cashOut;
-    const totalStockValue = products.reduce((acc, p) => acc + (Number(p.cost || 0) * Number(p.stock || 0)), 0);
+    const totalStockValue = products.reduce((acc, p) => {
+      const stock = (branchFilter === 'ALL' || !p.branchStocks)
+        ? (Number(p.stock) || 0)
+        : (Number(p.branchStocks[normalizeBranch(branchFilter)]) || 0);
+      return acc + (Number(p.cost || 0) * stock);
+    }, 0);
 
     const burn = todayTxs
       .filter(t => t.type === 'EXPENSE' || t.type === 'PURCHASE')
       .reduce((acc, t) => acc + Number(t.amount || 0), 0);
 
-    return { revenue, profit, todayCash, burn, totalStockValue, margin };
+    return { revenue: effectiveRevenue, profit, todayCash, burn, totalStockValue, margin };
   }, [transactions, products, categories, daySessions, branchFilter]);
 
   const salesTrend = useMemo(() => {
@@ -232,7 +240,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             revenueAmount = normalizeAmount(t.amount);
           }
 
-          dailyRevenueMap[key] += revenueAmount;
+          dailyRevenueMap[key] += revenueAmount + (reloadAmount * 0.04);
           dailyProfitMap[key] += (revenueAmount - costAmount) + (reloadAmount * 0.04);
         }
       }
@@ -361,7 +369,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         if (po && po.status === 'PENDING') {
           events.push({
             id: po.id,
-            date: po.chequeDate || po.date.split('T')[0],
+            date: po.chequeDate || (typeof po.date === 'string' ? po.date.split('T')[0] : ''),
             amount: po.totalAmount,
             entityId: po.vendorId,
             entity: vendors.find(v => v.id === po.vendorId)?.name || 'Supplier',
@@ -374,7 +382,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     }
 
-    const sorted = events.sort((a, b) => {
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    // Filter out past events (keep OUTSTANDING and dates >= today)
+    const validEvents = events.filter(e => e.date === 'OUTSTANDING' || e.date >= todayStr);
+
+    const sorted = validEvents.sort((a, b) => {
       if (a.date === 'OUTSTANDING' && b.date !== 'OUTSTANDING') return -1;
       if (a.date !== 'OUTSTANDING' && b.date === 'OUTSTANDING') return 1;
       if (a.date === 'OUTSTANDING' && b.date === 'OUTSTANDING') return b.amount - a.amount;
@@ -386,6 +399,28 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     return { list: sorted, totalIn, totalOut };
   }, [transactions, purchaseOrders, customers, vendors]);
+
+  // ---- CHEQUE NOTIFICATION LOGIC ----
+  const [chequeAlerts, setChequeAlerts] = React.useState<any[]>([]);
+  const [showChequeModal, setShowChequeModal] = React.useState(false);
+
+  React.useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1); // Tomorrow
+    const tomorrowStr = d.toISOString().split('T')[0];
+
+    // Find outgoing cheques due tomorrow
+    const alerts = futureFinancials.list.filter(e =>
+      e.date === tomorrowStr &&
+      e.method === 'CHEQUE' &&
+      e.type === 'OUTGOING'
+    );
+
+    if (alerts.length > 0) {
+      setChequeAlerts(alerts);
+      setShowChequeModal(true);
+    }
+  }, [futureFinancials]);
 
   const stockAlerts = useMemo(() =>
     products.filter(p => p.stock <= p.lowStockThreshold).sort((a, b) => a.stock - b.stock)
@@ -702,6 +737,95 @@ const Dashboard: React.FC<DashboardProps> = ({
           </ResponsiveContainer>
         </div>
       </div>
+
+
+      {/* CHEQUE NOTIFICATION MODAL */}
+      {
+        showChequeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl border border-slate-100 transform transition-all scale-100">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl animate-bounce">🔔</div>
+                    <h2 className="text-xl font-black uppercase text-slate-900 tracking-tighter">Cheque Clearance Alert</h2>
+                  </div>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest pl-1">Action Required for Tomorrow's Clearing</p>
+                </div>
+                <button
+                  onClick={() => setShowChequeModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 mb-6">
+                <p className="text-sm font-bold text-indigo-900 leading-relaxed">
+                  The following cheques are scheduled to be presented to the bank <span className="underline decoration-indigo-400 decoration-2 underline-offset-2">TOMORROW</span>.
+                  Please ensure sufficient funds are available in the respective accounts.
+                </p>
+              </div>
+
+              <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-3 mb-8 pr-2">
+                {chequeAlerts.map((alert, idx) => {
+                  // Calendar Date Logic
+                  const evtDate = alert.date.replace(/-/g, '');
+                  const alertDateStr = typeof alert.date === 'string' ? alert.date : new Date().toISOString();
+                  const nextDay = new Date(new Date(alertDateStr).getTime() + 86400000).toISOString().split('T')[0].replace(/-/g, '');
+
+                  // Email Body Logic
+                  const recipientEmail = "prasadmadura@gmail.com";
+                  const emailSubject = `URGENT: Cheque Clearance Alert - ${alert.entity}`;
+                  const emailBodyText = `Cheque Clearance Notification\r\n\r\nVendor: ${alert.entity}\r\nAmount: Rs. ${Number(alert.amount).toLocaleString()}\r\nCheque Date: ${alert.date}\r\n\r\nThis cheque is scheduled to hit the bank tomorrow.\r\n\r\nPlease ensure sufficient funds are available in the attached account.`;
+
+                  return (
+                    <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-colors gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-lg shadow-inner">🏦</div>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{alert.entity}</h4>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                            Amount: <span className="text-slate-700 font-mono">Rs. {Number(alert.amount).toLocaleString()}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <a
+                          href={`mailto:${recipientEmail}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBodyText)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 sm:flex-none px-4 py-2 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 group"
+                        >
+                          <span className="group-hover:scale-110 transition-transform">📧</span> Email Me
+                        </a>
+                        <a
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('CHEQUE DUE: ' + alert.entity + ' - Rs. ' + Number(alert.amount).toLocaleString())}&dates=${evtDate}/${nextDay}&details=${encodeURIComponent('Vendor: ' + alert.entity + '\nAmount: Rs. ' + Number(alert.amount).toLocaleString() + '\n\nReminder for: prasadmadura@gmail.com')}&add=prasadmadura@gmail.com`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 sm:flex-none px-4 py-2 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 group"
+                        >
+                          <span className="group-hover:scale-110 transition-transform">📅</span> Add to Cal
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-slate-100">
+                <button
+                  onClick={() => setShowChequeModal(false)}
+                  className="px-8 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20"
+                >
+                  Acknowledge & Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     </div >
   );
 };

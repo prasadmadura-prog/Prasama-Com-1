@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Vendor } from '../types';
+import { collections, upsertDocument, subscribeToCollection } from '../services/database';
 
 // Define the shape of a history item
 interface HistoryItem {
@@ -26,16 +27,17 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [] }) => {
     isAccountPayee: true
   });
 
-  // Load history from local storage
-  const [printHistory, setPrintHistory] = useState<HistoryItem[]>(() => {
-    const saved = localStorage.getItem('cheque_print_history');
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Load history from Firebase
+  const [printHistory, setPrintHistory] = useState<HistoryItem[]>([]);
 
-  // Save history to local storage whenever it changes
   useEffect(() => {
-    localStorage.setItem('cheque_print_history', JSON.stringify(printHistory));
-  }, [printHistory]);
+    const unsubscribe = subscribeToCollection(collections.chequeHistory, (data) => {
+      // Sort by timestamp or ID descending (newest first)
+      const sorted = [...data].sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+      setPrintHistory(sorted);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Derived unique payees for dropdown (History + Vendors)
   const uniquePayees = useMemo(() => {
@@ -83,21 +85,19 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [] }) => {
         payee: cheque.payee,
         amount: cheque.amount,
         amountInWords: cheque.amountInWords,
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toISOString()
       };
-      // Prepend to history (newest first)
-      setPrintHistory(prev => [newItem, ...prev]);
+
+      // Save to Firebase
+      upsertDocument(collections.chequeHistory, String(newItem.id), newItem)
+        .catch(err => console.error("Error saving cheque history:", err));
     }
 
     // 2. Trigger Print
     window.print();
   };
 
-  const handleDeleteHistory = (id: number) => {
-    if (window.confirm('Delete this record from history?')) {
-      setPrintHistory(prev => prev.filter(item => item.id !== id));
-    }
-  };
+
 
   const handleReprint = (item: HistoryItem) => {
     setCheque({
@@ -267,13 +267,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [] }) => {
                       >
                         ♻️
                       </button>
-                      <button
-                        onClick={() => handleDeleteHistory(item.id)}
-                        className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
-                        title="Delete from History"
-                      >
-                        🗑️
-                      </button>
+
                     </div>
                   </div>
                 ))}

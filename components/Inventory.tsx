@@ -36,6 +36,22 @@ const Inventory: React.FC<InventoryProps> = ({
   const [activeTab, setActiveTab] = useState<'ITEMS' | 'CATEGORIES'>('ITEMS');
   const [saveStatus, setSaveStatus] = useState<'IDLE' | 'SAVING' | 'SUCCESS'>('IDLE');
 
+  // Pagination State - Products
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+
+  // Pagination State - Categories
+  const [currentCategoryPage, setCurrentCategoryPage] = useState(1);
+
+  // Reset page when search or category filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterCategoryId]);
+
+  useEffect(() => {
+    setCurrentCategoryPage(1);
+  }, [categorySearchTerm]);
+
   const [costValue, setCostValue] = useState<number>(0);
   const [priceValue, setPriceValue] = useState<number>(0);
 
@@ -81,10 +97,10 @@ const Inventory: React.FC<InventoryProps> = ({
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || 'Uncategorized';
 
   const handleDownloadSample = () => {
-    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Alert Threshold'];
+    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Primary Vendor', 'Alert Threshold'];
     const sampleRows = [
-      ['EXAMPLE ITEM A', '1001', '125.00', '250.00', '100', 'GENERAL', '10'],
-      ['EXAMPLE ITEM B', '1002', '50.00', '90.00', '50', 'STATIONERY', '5']
+      ['EXAMPLE ITEM A', '1001', '125.00', '250.00', '100', 'GENERAL', 'SUPPLIER X', '10'],
+      ['EXAMPLE ITEM B', '1002', '50.00', '90.00', '50', 'STATIONERY', 'SUPPLIER Y', '5']
     ];
     const csvContent = [headers.join(','), ...sampleRows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -97,7 +113,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleExportCatalog = () => {
     if (products.length === 0) return alert("Catalog is empty.");
-    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Alert Threshold'];
+    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Primary Vendor', 'Alert Threshold'];
     const rows = products.map(p => [
       p.name.replace(/,/g, ''),
       p.sku,
@@ -105,6 +121,7 @@ const Inventory: React.FC<InventoryProps> = ({
       p.price,
       p.stock,
       getCategoryName(p.categoryId).replace(/,/g, ''),
+      (vendors.find(v => v.id === p.vendorId)?.name || 'INTERNAL').replace(/,/g, ''),
       p.lowStockThreshold
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -127,11 +144,23 @@ const Inventory: React.FC<InventoryProps> = ({
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [products, filterCategoryId, searchTerm]);
 
+  const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredProducts, currentPage]);
+
   const filteredCategories = useMemo(() => {
     return categories
       .filter(c => c.name.toLowerCase().includes(categorySearchTerm.toLowerCase()))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [categories, categorySearchTerm]);
+
+  const totalCategoryPages = Math.ceil(filteredCategories.length / ITEMS_PER_PAGE);
+  const paginatedCategories = useMemo(() => {
+    const start = (currentCategoryPage - 1) * ITEMS_PER_PAGE;
+    return filteredCategories.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredCategories, currentCategoryPage]);
 
   const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -165,8 +194,9 @@ const Inventory: React.FC<InventoryProps> = ({
         setEditingProduct(null);
         setSaveStatus('IDLE');
       }, 800);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert("Synchronization Failed: " + (err.message || "Unknown error"));
       setSaveStatus('IDLE');
     }
   };
@@ -220,7 +250,7 @@ const Inventory: React.FC<InventoryProps> = ({
             branchStocks: bStocks,
             stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0),
             categoryId: catId,
-            vendorId: item.vendor_id || '',
+            vendorId: vendors.find(v => v.name.toUpperCase() === String(item['primary vendor'] || item.vendor || '').toUpperCase())?.id || item.vendor_id || '',
             lowStockThreshold: parseInt(item.alert_threshold || item.threshold) || 5,
             internalNotes: `Imported: ${new Date().toLocaleDateString()}`
           };
@@ -300,7 +330,7 @@ const Inventory: React.FC<InventoryProps> = ({
       </header>
 
       {activeTab === 'ITEMS' ? (
-        <>
+        <div className="space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-center bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm">
             <div className="relative flex-1 w-full">
               <input type="text" placeholder="Search Master Catalog (Name, SKU)..." className="w-full pl-12 pr-6 py-4 rounded-[2rem] border border-slate-200 outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-black text-slate-800 uppercase text-xs" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -310,6 +340,49 @@ const Inventory: React.FC<InventoryProps> = ({
               <option value="All">All Categories</option>
               {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
             </select>
+          </div>
+
+          {/* Inventory Valuation Summary Bar */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2">
+            {(() => {
+              const stats = filteredProducts.reduce((acc, p) => {
+                const bStock = p.branchStocks ? (Number(p.branchStocks[userProfile.branch]) || 0) : (Number(p.stock) || 0);
+                const gStock = p.branchStocks ? (Object.values(p.branchStocks) as number[]).reduce((a, b) => a + (Number(b) || 0), 0) : (Number(p.stock) || 0);
+
+                return {
+                  unitsBranch: acc.unitsBranch + bStock,
+                  unitsGlobal: acc.unitsGlobal + gStock,
+                  valueRetailBranch: acc.valueRetailBranch + (bStock * (Number(p.price) || 0)),
+                  valueCostBranch: acc.valueCostBranch + (bStock * (Number(p.cost) || 0)),
+                  valueRetailGlobal: acc.valueRetailGlobal + (gStock * (Number(p.price) || 0)),
+                  valueCostGlobal: acc.valueCostGlobal + (gStock * (Number(p.cost) || 0))
+                };
+              }, { unitsBranch: 0, unitsGlobal: 0, valueRetailBranch: 0, valueCostBranch: 0, valueRetailGlobal: 0, valueCostGlobal: 0 });
+
+              return (
+                <>
+                  <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Items Categorized</p>
+                    <p className="text-xl font-black text-slate-900 leading-none">{filteredProducts.length} <span className="text-xs text-slate-400">Products</span></p>
+                  </div>
+                  <div className="bg-indigo-600 p-6 rounded-[2rem] shadow-xl shadow-indigo-100 flex flex-col justify-center text-white">
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Filtered Stock (Branch)</p>
+                    <p className="text-xl font-black leading-none">{stats.unitsBranch.toLocaleString()} <span className="text-xs opacity-60">Units</span></p>
+                    <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: {stats.unitsGlobal.toLocaleString()} Units</p>
+                  </div>
+                  <div className="bg-emerald-600 p-6 rounded-[2rem] shadow-xl shadow-emerald-100 flex flex-col justify-center text-white">
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Retail Value (Branch)</p>
+                    <p className="text-xl font-black leading-none">Rs. {Math.round(stats.valueRetailBranch).toLocaleString()}</p>
+                    <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: Rs. {Math.round(stats.valueRetailGlobal).toLocaleString()}</p>
+                  </div>
+                  <div className="bg-amber-500 p-6 rounded-[2rem] shadow-xl shadow-amber-100 flex flex-col justify-center text-white">
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Cost Valuation (Branch)</p>
+                    <p className="text-xl font-black leading-none">Rs. {Math.round(stats.valueCostBranch).toLocaleString()}</p>
+                    <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: Rs. {Math.round(stats.valueCostGlobal).toLocaleString()}</p>
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           <div className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
@@ -324,7 +397,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filteredProducts.map(p => (
+                {paginatedProducts.map(p => (
                   <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
                     <td className="px-10 py-4">
                       <p className="font-black text-slate-900 text-[13px] uppercase mb-1 tracking-tight leading-none">{p.name}</p>
@@ -360,14 +433,39 @@ const Inventory: React.FC<InventoryProps> = ({
                   </tr >
                 ))}
                 {
-                  filteredProducts.length === 0 && (
+                  paginatedProducts.length === 0 && (
                     <tr><td colSpan={5} className="py-40 text-center opacity-30 text-xs font-black uppercase tracking-[0.4em] italic">No Assets matched search criteria</td></tr>
                   )
                 }
               </tbody >
             </table >
-          </div >
-        </>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="px-10 py-6 bg-slate-50/50 border-t border-slate-50 flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                  Showing Page {currentPage} of {totalPages} ({filteredProducts.length} Records)
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className="px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 shadow-sm"
+                  >
+                    ← Previous
+                  </button>
+                  <button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    className="px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 shadow-sm"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
         <div className="space-y-8">
           <div className="flex flex-col md:flex-row gap-4 items-center bg-white p-6 rounded-[3rem] border border-slate-100 shadow-sm">
@@ -381,7 +479,7 @@ const Inventory: React.FC<InventoryProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredCategories.map(cat => (
+            {paginatedCategories.map(cat => (
               <div
                 key={cat.id}
                 className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex justify-between items-center group hover:border-indigo-500 hover:shadow-2xl hover:shadow-indigo-500/5 transition-all duration-500 cursor-pointer"
@@ -400,13 +498,38 @@ const Inventory: React.FC<InventoryProps> = ({
               </div>
             ))}
 
-            {filteredCategories.length === 0 && (
+            {paginatedCategories.length === 0 && (
               <div className="col-span-full py-40 text-center text-slate-200">
                 <div className="text-8xl mb-4 grayscale opacity-10">📂</div>
                 <p className="text-xs font-black uppercase tracking-[0.5em]">Category Vault is Empty</p>
               </div>
             )}
           </div>
+
+          {/* Category Pagination Controls */}
+          {totalCategoryPages > 1 && (
+            <div className="mt-8 px-10 py-6 bg-white rounded-[2rem] border border-slate-100 flex items-center justify-between shadow-sm">
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                Showing Page {currentCategoryPage} of {totalCategoryPages} ({filteredCategories.length} Categories)
+              </p>
+              <div className="flex gap-2">
+                <button
+                  disabled={currentCategoryPage === 1}
+                  onClick={() => setCurrentCategoryPage(p => Math.max(1, p - 1))}
+                  className="px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 shadow-sm"
+                >
+                  ← Previous
+                </button>
+                <button
+                  disabled={currentCategoryPage === totalCategoryPages}
+                  onClick={() => setCurrentCategoryPage(p => Math.min(totalCategoryPages, p + 1))}
+                  className="px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 shadow-sm"
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )
       }
@@ -478,8 +601,8 @@ const Inventory: React.FC<InventoryProps> = ({
                         className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white"
                       />
                       {editingProduct && editingProduct.branchStocks && (() => {
-                        const total = Object.values(editingProduct.branchStocks).reduce((a, b) => a + Number(b), 0);
-                        const current = editingProduct.branchStocks[userProfile.branch] || 0;
+                        const total = Number(Object.values(editingProduct.branchStocks).reduce((acc: number, b) => acc + Number(b || 0), 0));
+                        const current = Number(editingProduct.branchStocks[userProfile.branch]) || 0;
                         const others = total - current;
                         if (others > 0) {
                           return (
@@ -487,17 +610,46 @@ const Inventory: React.FC<InventoryProps> = ({
                               <span className="text-[9px] font-bold text-amber-700 uppercase tracking-wide">⚠️ {others} Units in other branches</span>
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={async () => {
                                   if (!confirm("Clear all stock from other branches? This cannot be undone.")) return;
-                                  const updatedStocks = { [userProfile.branch]: current };
-                                  setEditingProduct({ ...editingProduct, branchStocks: updatedStocks });
+
+                                  const currentBranch = userProfile.branch;
+                                  const currentStock = Number(editingProduct.branchStocks?.[currentBranch]) || 0;
+
+                                  // Construct a new object where EVERY other known branch is set to 0.
+                                  // This is necessary because upsertDocument uses {merge: true}.
+                                  const clearedStocks: Record<string, number> = {};
+                                  if (editingProduct.branchStocks) {
+                                    Object.keys(editingProduct.branchStocks).forEach(branchName => {
+                                      clearedStocks[branchName] = branchName === currentBranch ? currentStock : 0;
+                                    });
+                                  } else {
+                                    clearedStocks[currentBranch] = currentStock;
+                                  }
+
+                                  const updatedProduct: Product = {
+                                    ...editingProduct,
+                                    branchStocks: clearedStocks,
+                                    stock: currentStock
+                                  };
+
+                                  try {
+                                    setSaveStatus('SAVING');
+                                    await onUpsertProduct(updatedProduct);
+                                    setEditingProduct(updatedProduct);
+                                    setSaveStatus('SUCCESS');
+                                    setTimeout(() => setSaveStatus('IDLE'), 1000);
+                                  } catch (e: any) {
+                                    alert("Error: " + e.message);
+                                    setSaveStatus('IDLE');
+                                  }
                                 }}
                                 className="text-[9px] font-black bg-white text-amber-600 border border-amber-200 px-2 py-1 rounded-lg hover:bg-amber-100"
                               >
                                 Clear Others
                               </button>
                             </div>
-                          )
+                          );
                         }
                         return null;
                       })()}
@@ -525,7 +677,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 </div>
               </form>
             </div>
-          </div>
+          </div >
         )
       }
 

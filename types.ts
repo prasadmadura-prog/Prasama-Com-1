@@ -46,7 +46,10 @@ export type POStatus = 'DRAFT' | 'PENDING' | 'RECEIVED' | 'CANCELLED';
 
 export interface PurchaseOrderItem {
   productId: string;
+  productName?: string; // Store product name at time of PO creation
+  productSku?: string;  // Store SKU at time of PO creation
   quantity: number;
+  freeQuantity?: number; // Support for free issue items
   cost: number;
 }
 
@@ -64,6 +67,9 @@ export interface PurchaseOrder {
   chequeDate?: string;
   userId?: string;
   branchId?: string;
+  notes?: string;
+  mainCategory?: string;
+  category?: string;
 }
 
 export interface QuotationItem {
@@ -158,7 +164,7 @@ export interface UserProfile {
   email?: string;
 }
 
-export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING';
+export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD';
 
 export interface POSSession {
   cart: {
@@ -179,4 +185,7 @@ export interface POSSession {
   chequeDate?: string;
   isAdvance?: boolean;
   advanceAmount?: number;
+  transactionId?: string;
+  transactionDate?: string;
+  selectedPOSCustomerId?: string;
 }

@@ -7,10 +7,11 @@ interface SettingsProps {
   setUserProfile: React.Dispatch<React.SetStateAction<UserProfile>>;
   onExport: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onResyncBalances: () => void;
   syncStatus: 'IDLE' | 'SYNCING' | 'ERROR' | 'OFFLINE';
 }
 
-const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExport, onImport, syncStatus }) => {
+const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExport, onImport, onResyncBalances, syncStatus }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -170,7 +171,21 @@ const Settings: React.FC<SettingsProps> = ({ userProfile, setUserProfile, onExpo
               <input type="file" ref={fileInputRef} onChange={onImport} accept=".json" className="hidden" />
             </div>
 
-            <div className="pt-8 border-t border-slate-100">
+            <div className="pt-8 border-t border-slate-100 space-y-4">
+              <div className="p-6 bg-indigo-50 rounded-3xl border border-indigo-100 flex items-center gap-6 group hover:border-indigo-300 transition-all">
+                <div className="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-3xl">🧮</div>
+                <div className="flex-1">
+                  <h4 className="font-black text-indigo-900 uppercase text-xs">Recalculate Ledger Balances</h4>
+                  <p className="text-[10px] text-indigo-400 font-medium italic">Audit and re-sync all Vendor & Customer credit balances.</p>
+                </div>
+                <button
+                  onClick={onResyncBalances}
+                  className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-indigo-700 active:scale-95 transition-all shadow-lg shadow-indigo-100"
+                >
+                  Recalculate
+                </button>
+              </div>
+
               <div className="p-6 bg-rose-50 rounded-3xl border border-rose-100 flex items-center gap-6 group">
                 <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center text-3xl">⚠️</div>
                 <div className="flex-1">

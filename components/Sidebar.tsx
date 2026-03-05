@@ -37,6 +37,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'CUSTOMERS', label: 'Customers', icon: '👥' },
     { id: 'FINANCE', label: 'Finance', icon: '💰' },
     { id: 'ACCOUNTING', label: 'Accounting', icon: '📈' },
+    { id: 'RELOAD', label: 'Reload', icon: '📱' },
     { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '✍️' },
     { id: 'SETTINGS', label: 'Settings', icon: '⚙️' },
   ];
