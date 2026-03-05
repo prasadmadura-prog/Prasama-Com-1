@@ -701,7 +701,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       retailProfit: number
     }> = {
       'CASHIER 1': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
-      'CASHIER 2': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 }
+      'CASHIER 2': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
+      'CASHIER 3': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 }
     };
 
     rangeEntries.filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT').forEach(s => {
@@ -788,7 +789,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="flex flex-col items-center">
               <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-4">Reload Sales</p>
               <div className="flex justify-between w-full gap-4">
-                {['CASHIER 1', 'CASHIER 2'].map(branch => (
+                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3'].map(branch => (
                   <div key={branch} className="flex-1 text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
                     <p className="text-xl font-black text-rose-600 font-mono tracking-tighter mb-2">
@@ -807,7 +808,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="flex flex-col items-center">
               <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-4">Retail Sales</p>
               <div className="flex justify-between w-full gap-4">
-                {['CASHIER 1', 'CASHIER 2'].map(branch => (
+                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3'].map(branch => (
                   <div key={branch} className="flex-1 text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
                     <p className="text-xl font-black text-slate-900 font-mono tracking-tighter mb-2">
@@ -960,6 +961,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
               <>
                 <option value="CASHIER 1">Cashier 1</option>
                 <option value="CASHIER 2">Cashier 2</option>
+                <option value="CASHIER 3">Cashier 3</option>
               </>
             )}
           </select>
@@ -1209,6 +1211,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                         <>
                           <option value="CASHIER 1">CASHIER 1</option>
                           <option value="CASHIER 2">CASHIER 2</option>
+                          <option value="CASHIER 3">CASHIER 3</option>
                         </>
                       )}
                   </select>

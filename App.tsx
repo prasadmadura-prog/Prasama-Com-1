@@ -46,7 +46,7 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: "PRASAMA ERP",
     branch: "CASHIER 1",
-    allBranches: ["CASHIER 1", "CASHIER 2"],
+    allBranches: ["CASHIER 1", "CASHIER 2", "CASHIER 3"],
     phone: "",
     isAdmin: false
   });
@@ -73,7 +73,7 @@ const App: React.FC = () => {
   // Any sale from CASHIER 2 or others will deduct from CASHIER 1's stock
   const getStockBranch = (branch: string) => {
     const b = (branch || '').toUpperCase();
-    if (b === 'CASHIER 2' || b === 'SHOP 2' || b === 'LOCAL NODE') return 'CASHIER 1';
+    if (b === 'CASHIER 2' || b === 'CASHIER 3' || b === 'SHOP 2' || b === 'LOCAL NODE') return 'CASHIER 1';
     return branch || 'CASHIER 1';
   };
 
@@ -115,6 +115,7 @@ const App: React.FC = () => {
       });
       // Ensure we have our core branches
       if (!newProfile.allBranches.includes('CASHIER 2')) newProfile.allBranches.push('CASHIER 2');
+      if (!newProfile.allBranches.includes('CASHIER 3')) newProfile.allBranches.push('CASHIER 3');
       newProfile.allBranches = [...new Set(newProfile.allBranches)]; // Filter unique
     }
     return newProfile;
