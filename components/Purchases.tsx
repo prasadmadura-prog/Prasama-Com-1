@@ -1370,6 +1370,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                         <option value="SOFTWARE" />
                         <option value="STORE SUPPLIES" />
                         <option value="FURNITURE" />
+                        <option value="RELOAD" />
                       </datalist>
                     </div>
 
