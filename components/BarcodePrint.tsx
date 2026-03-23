@@ -8,7 +8,7 @@ interface BarcodePrintProps {
 }
 
 type LabelSize = 'SMALL' | 'MEDIUM' | 'LARGE';
-type PaperSize = 'A4' | 'LETTER' | 'ROLL';
+type PaperSize = 'A4' | 'A5' | 'LETTER' | 'ROLL';
 
 interface PrintSettings {
   labelSize: LabelSize;
@@ -16,6 +16,7 @@ interface PrintSettings {
   showPrice: boolean;
   showSKU: boolean;
   showName: boolean;
+  showNotes: boolean;
   paperSize: PaperSize;
 }
 
@@ -30,6 +31,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
     showPrice: true,
     showSKU: true,
     showName: true,
+    showNotes: true,
     paperSize: 'A4'
   });
 
@@ -78,42 +80,102 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
     if (!printWindow) return;
 
     const labelDim = {
-      SMALL: { h: '30mm', f: '10px', bh: 30 },
-      MEDIUM: { h: '45mm', f: '12px', bh: 45 },
-      LARGE: { h: '60mm', f: '16px', bh: 60 }
+      SMALL: { h: '25mm', w: '42mm', f: '8px', bh: 30, bw: 1.2 },
+      MEDIUM: { h: '45mm', w: '65mm', f: '12px', bh: 100, bw: 2.0 },
+      LARGE: { h: '60mm', w: '100mm', f: '16px', bh: 140, bw: 2.5 }
     }[settings.labelSize];
 
-    const paperWidth = settings.paperSize === 'ROLL' ? '80mm' : '210mm';
+    const paperSizes = {
+      'ROLL': { width: '80mm', style: '80mm auto' },
+      'A5': { width: '140mm', style: 'a5 portrait' },
+      'A4': { width: '200mm', style: 'a4 portrait' },
+      'LETTER': { width: '205mm', style: 'letter portrait' }
+    };
+    const currentPaper = paperSizes[settings.paperSize];
 
     let html = `
       <html>
       <head>
         <title>Barcode Print Manifest</title>
         <style>
-          @page { size: ${settings.paperSize === 'ROLL' ? '80mm auto' : settings.paperSize.toLowerCase()}; margin: 5mm; }
-          body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background: white; }
+          @page { size: ${currentPaper.style}; margin: 5mm; }
+          body { margin: 0; padding: 0; font-family: 'Times New Roman', Times, serif; background: white; }
           .grid {
             display: grid;
             grid-template-columns: repeat(${settings.columns}, 1fr);
             gap: 2mm;
-            width: ${paperWidth};
+            width: ${currentPaper.width};
+            margin: 0 auto;
           }
           .label {
-            border: 0.1mm solid #eee;
+            border: 0.1mm dashed #ccc;
+            border-radius: 0;
+            width: ${labelDim.w};
             height: ${labelDim.h};
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             text-align: center;
-            padding: 2mm;
+            padding: 0.5mm;
             box-sizing: border-box;
-            overflow: hidden;
+            overflow: visible;
             page-break-inside: avoid;
+            background: #fff;
+            margin: 1mm auto;
+            position: relative;
           }
-          .name { font-weight: 800; text-transform: uppercase; font-size: ${labelDim.f}; margin-bottom: 1mm; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.1; word-break: break-word; }
-          .barcode-svg { max-width: 90%; height: auto; margin-top: 1mm; }
-          .price { font-weight: 900; font-size: calc(${labelDim.f} + 2px); margin-top: 1.5mm; }
+          .name { 
+            font-weight: 400; 
+            font-size: calc(${labelDim.f} - 1px); 
+            margin-bottom: 1mm; 
+            max-width: 100%; 
+            line-height: 1.1;
+            color: #000;
+            font-family: 'Times New Roman', Times, serif;
+          }
+          .barcode-svg { 
+            width: 100%; 
+            height: auto;
+            display: block;
+          }
+          .company-name {
+            font-size: calc(${labelDim.f} - 4px);
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 0.5mm;
+            color: #333;
+            line-height: 1;
+          }
+          .price { 
+            font-weight: 800; 
+            font-size: calc(${labelDim.f} + 4px); 
+            margin-top: 0.2mm;
+            color: #000;
+            line-height: 1;
+            white-space: nowrap;
+          }
+          .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-top: 0mm;
+          }
+          .notes-footer {
+            font-size: 8px;
+            font-weight: 900;
+            text-transform: uppercase;
+            color: #000;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 2mm;
+            flex: 1;
+            text-align: center;
+          }
         </style>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
       </head>
@@ -123,17 +185,30 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
     itemsToPrint.forEach(p => {
       const count = selections[p.id];
+      const isNumeric = /^\d+$/.test(p.sku);
+      const isEAN = p.sku.length === 13 && isNumeric;
+      const isUPC = p.sku.length === 12 && isNumeric;
+      const format = isEAN ? 'EAN13' : (isUPC ? 'UPC' : 'CODE128');
+
       for (let i = 0; i < count; i++) {
         html += `<div class="label">
           ${settings.showName ? `<div class="name">${p.name}</div>` : ''}
-          <svg class="barcode-svg" 
-            jsbarcode-value="${p.sku}" 
-            jsbarcode-format="CODE128"
-            jsbarcode-height="${labelDim.bh}"
-            jsbarcode-fontSize="10"
-            jsbarcode-displayValue="${settings.showSKU}"
-          ></svg>
-          ${settings.showPrice ? `<div class="price">Rs. ${p.price.toLocaleString()}</div>` : ''}
+          <div style="flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; overflow: hidden;">
+            <svg class="barcode-svg" 
+              data-value="${p.sku || '0000'}" 
+              data-format="${format}"
+              data-bh="${labelDim.bh}"
+              data-bw="${labelDim.bw}"
+              data-fs="${settings.labelSize === 'SMALL' ? '12' : '22'}"
+              data-disp="${settings.showSKU}"
+              data-margin="${format === 'CODE128' ? '0' : '8'}"
+            ></svg>
+          </div>
+          <div class="footer">
+            ${settings.showPrice ? `<div class="price">Rs. ${Number(p.price || 0).toLocaleString()}</div>` : ''}
+            ${settings.showNotes && p.internalNotes ? `<div class="notes-footer">${p.internalNotes}</div>` : ''}
+            <div class="company-name">Prasama(Pvt)Ltd</div>
+          </div>
         </div>`;
       }
     });
@@ -142,11 +217,69 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
         </div>
         <script>
           window.onload = function() {
-            JsBarcode(".barcode-svg").init();
+            var items = document.querySelectorAll('.barcode-svg');
+            
+            for (var i = 0; i < items.length; i++) {
+              (function(oldItem) {
+                var value = oldItem.getAttribute('data-value') || '';
+                if (value.trim() === '') value = '0000';
+                
+                var format = oldItem.getAttribute('data-format') || 'CODE128';
+                var bw = oldItem.getAttribute('data-bw') || '2.0';
+                var bh = oldItem.getAttribute('data-bh') || '100';
+                var fs = oldItem.getAttribute('data-fs') || '12';
+                var disp = oldItem.getAttribute('data-disp') === 'true';
+                var marginAttr = oldItem.getAttribute('data-margin') || '0';
+                
+                var createBarcode = function(f, v, attempt) {
+                   var isValid = true;
+                   var canvas = document.createElement("canvas");
+                   try {
+                       var actualMargin = (f === 'CODE128') ? 12 : parseInt(marginAttr);
+                       JsBarcode(canvas, String(v), {
+                         format: f,
+                         width: parseFloat(bw),
+                         height: parseInt(bh),
+                         fontOptions: "bold",
+                         fontSize: parseInt(fs),
+                         displayValue: disp,
+                         margin: actualMargin,
+                         textMargin: 0,
+                         valid: function(status) { isValid = status; }
+                       });
+                       
+                       if (!isValid) throw new Error("Invalid format " + f);
+                       
+                       var img = document.createElement("img");
+                       img.src = canvas.toDataURL("image/png");
+                       img.style.maxWidth = "100%";
+                       img.style.maxHeight = "100%";
+                       img.style.objectFit = "contain";
+                       img.style.display = "block";
+                       
+                       oldItem.parentNode.replaceChild(img, oldItem);
+                   } catch(e) {
+                       if (attempt === 2) return createBarcode('CODE128', v, 1);
+                       if (attempt === 1) return createBarcode('CODE128', '0000', 0);
+                       
+                       var errDiv = document.createElement('div');
+                       errDiv.style.color = 'red';
+                       errDiv.style.fontSize = '8px';
+                       errDiv.style.fontWeight = 'bold';
+                       errDiv.style.textAlign = 'center';
+                       errDiv.textContent = "ERR: " + e.message;
+                       oldItem.parentNode.replaceChild(errDiv, oldItem);
+                   }
+                };
+                
+                createBarcode(format, value, 2);
+              })(items[i]);
+            }
+
             setTimeout(function() {
               window.print();
               window.close();
-            }, 500);
+            }, 800);
           }
         </script>
       </body>
@@ -160,9 +293,12 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Barcode Terminal</h2>
-          <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">Ready for {totalLabels} Output Units</p>
+        <div className="flex gap-4 items-center">
+          <div>
+            <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none inline-block">Barcode Terminal</h2>
+            <div className="inline-block ml-4 px-3 py-1 bg-amber-100 text-amber-700 text-[8px] font-black uppercase rounded-full border border-amber-200 animate-pulse">New Version Sync</div>
+            <p className="text-slate-500 font-bold uppercase tracking-widest text-[9px] mt-2">Ready for {totalLabels} Output Units • Build 1.2.5-SUPER</p>
+          </div>
         </div>
         <button
           onClick={handlePrint}
@@ -199,8 +335,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
             <div>
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Paper Standard</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['A4', 'LETTER', 'ROLL'] as PaperSize[]).map(p => (
+              <div className="grid grid-cols-4 gap-2">
+                {(['A4', 'A5', 'LETTER', 'ROLL'] as PaperSize[]).map(p => (
                   <button
                     key={p}
                     onClick={() => setSettings({ ...settings, paperSize: p })}
@@ -242,6 +378,12 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                   className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${settings.showSKU ? 'text-emerald-600' : 'text-slate-300'}`}
                 >
                   <span className="text-sm">{settings.showSKU ? '☑' : '☐'}</span> SKU
+                </button>
+                <button
+                  onClick={() => setSettings({ ...settings, showNotes: !settings.showNotes })}
+                  className={`flex items-center gap-2 text-[9px] font-black uppercase tracking-widest ${settings.showNotes ? 'text-emerald-600' : 'text-slate-300'}`}
+                >
+                  <span className="text-sm">{settings.showNotes ? '☑' : '☐'}</span> Notes
                 </button>
               </div>
             </div>
@@ -285,8 +427,9 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                   {filteredProducts.map(p => (
                     <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
                       <td className="px-8 py-5">
-                        <p className="font-black text-slate-900 uppercase text-[12px] tracking-tight">{p.name}</p>
+                        <p className="font-black text-slate-900 text-[12px] tracking-tight">{p.name}</p>
                         <p className="text-[10px] text-indigo-500 font-mono font-black uppercase mt-0.5">{p.sku}</p>
+                        {p.internalNotes && <p className="text-[9px] text-rose-500 font-bold uppercase mt-1 italic">Note: {p.internalNotes}</p>}
                       </td>
                       <td className="px-8 py-5">
                         <div className="flex items-center justify-center gap-4">

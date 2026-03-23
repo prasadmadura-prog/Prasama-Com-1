@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test</title>
+    <style>
+          .label {
+            border: 0.1mm dashed #ccc;
+            border-radius: 0;
+            width: 65mm;
+            height: 45mm;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            text-align: center;
+            padding: 0.5mm;
+            box-sizing: border-box;
+            background: #fff;
+            margin: 1mm auto;
+          }
+          .barcode-svg { 
+            width: 100%; 
+            height: auto;
+            display: block;
+          }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+</head>
+<body>
+    <div class="label" id="wrapper">
+          <div style="flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; overflow: hidden;">
+            <svg class="barcode-svg" id="testsvg"></svg>
+          </div>
+    </div>
+    <script>
+        var item = document.getElementById('testsvg');
+        var render = function(f, v) {
+            item.innerHTML = '';
+            item.removeAttribute('viewBox');
+            item.removeAttribute('width');
+            item.removeAttribute('height');
+
+            JsBarcode(item, String(v), {
+                format: f,
+                width: 2.0,
+                height: 100,
+                fontOptions: "bold",
+                fontSize: 12,
+                displayValue: true,
+                margin: 0,
+                textMargin: 0
+            });
+            var pathCount = item.querySelectorAll('path, rect').length;
+            if (pathCount < 2) throw new Error("empty");
+        };
+
+        try {
+            render("UPC", "479600546170");
+        } catch(e) {
+            console.log("caught upc error, falling back");
+            try {
+                render("CODE128", "479600546170");
+            } catch(e2) {}
+        }
+    </script>
+</body>
+</html>

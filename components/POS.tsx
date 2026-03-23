@@ -95,7 +95,8 @@ const POS: React.FC<POSProps> = ({
     return products.filter(p => {
       const matchesSearch = !search.trim() ||
         (p.name || "").toLowerCase().includes(search.toLowerCase()) ||
-        (p.sku || "").toLowerCase().includes(search.toLowerCase());
+        (p.sku || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.internalNotes || "").toLowerCase().includes(search.toLowerCase());
 
       const matchesCat = !categoryId || categoryId === 'All' || p.categoryId === categoryId;
 
@@ -492,11 +493,11 @@ const POS: React.FC<POSProps> = ({
       const rowNet = (item.quantity * item.price) - (item.discount || 0);
       return `
         <tr>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
           <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 8%; text-align: center;">${item.quantity}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">${Number(item.price).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 22%; text-align: right;">${rowNet.toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${Number(item.price).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 14%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${rowNet.toLocaleString()}</td>
         </tr>
       `;
     }).join('');
@@ -554,11 +555,11 @@ const POS: React.FC<POSProps> = ({
             <table>
               <thead>
                 <tr>
-                  <th style="text-align: left; width: 30%;">ITEM</th>
+                  <th style="text-align: left; width: 48%;">ITEM</th>
                   <th style="text-align: center; width: 8%;">QTY</th>
-                  <th style="text-align: right; width: 20%;">RATE</th>
-                  <th style="text-align: right; width: 20%;">DISC</th>
-                  <th style="text-align: right; width: 22%;">AMT</th>
+                  <th style="text-align: right; width: 15%;">RATE</th>
+                  <th style="text-align: right; width: 14%;">DISC</th>
+                  <th style="text-align: right; width: 15%;">AMT</th>
                 </tr>
               </thead>
               <tbody>
@@ -590,9 +591,13 @@ const POS: React.FC<POSProps> = ({
             </div>` : ''}
             <div class="hr"></div>
             <div style="font-size: 8px; text-align: right; font-weight: 800;">PAID BY: ${tx.paymentMethod}</div>
+            <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                * The advance payment for artworks is non-refundable.<br/>
+                * Payments made for printouts or photocopies are non-refundable.<br/>
+                * Exchanges are accepted on the same day only. No refunds will be provided.
+            </div>
             <div class="footer">
-                THANK YOU - VISIT AGAIN<br/>
-                PRASAMA ERP SOLUTIONS
+                THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS
             </div>
           </div>
         </body>
@@ -801,11 +806,14 @@ const POS: React.FC<POSProps> = ({
                   const isLowStock = (p.stock || 0) <= (p.lowStockThreshold || 0);
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-all group">
-                      <td className="px-3 py-0 overflow-hidden leading-none">
-                        <div className="flex items-center gap-1.5 overflow-hidden max-w-full">
-                          <p className="font-black text-slate-800 text-[10px] uppercase truncate shrink leading-tight">{p.name}</p>
-                          <span className="text-slate-200 shrink-0 text-[8px]">•</span>
-                          <p className="text-[7px] font-mono font-bold text-indigo-400 uppercase truncate opacity-70 shrink-0 leading-tight">{p.sku}</p>
+                      <td className="px-3 py-1 overflow-hidden leading-none">
+                        <div className="flex flex-col gap-0.5 overflow-hidden max-w-full">
+                          <div className="flex items-center gap-1.5 overflow-hidden">
+                            <p className="font-black text-slate-800 text-[10px] uppercase truncate shrink leading-tight">{p.name}</p>
+                            <span className="text-slate-200 shrink-0 text-[8px]"> • </span>
+                            <p className="text-[7px] font-mono font-bold text-indigo-400 uppercase truncate opacity-70 shrink-0 leading-tight">{p.sku}</p>
+                          </div>
+                          {p.internalNotes && <p className="text-[6px] font-black text-rose-400 uppercase tracking-widest truncate">{p.internalNotes}</p>}
                         </div>
                       </td>
                       <td className="px-2 py-0.5 text-right whitespace-nowrap">

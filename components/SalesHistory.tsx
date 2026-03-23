@@ -285,7 +285,12 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     <h2 style="margin: 4px 0; font-size: 14px;">Rs. ${Number(tx.amount).toLocaleString()}</h2>
                     <p style="margin: 1px 0; text-align: right; font-weight: 800;">BY: ${tx.paymentMethod}</p>
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    <p style="font-size: 8px; font-weight: 800; margin-top: 8px;">PRASAMA ERP SOLUTIONS</p>
+                    <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                        * The advance payment for artworks is non-refundable.<br/>
+                        * Payments made for printouts or photocopies are non-refundable.<br/>
+                        * Exchanges are accepted on the same day only. No refunds will be provided.
+                    </div>
+                    <p style="font-size: 8px; font-weight: 800; margin-top: 8px;">THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS</p>
                 </body>
             </html>
         `);
@@ -304,11 +309,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const rowNet = (item.quantity * item.price) - (item.discount || 0);
       return `
         <tr>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
           <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 8%; text-align: center;">${item.quantity}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">${Number(item.price).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 22%; text-align: right;">${rowNet.toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${Number(item.price).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 14%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${rowNet.toLocaleString()}</td>
         </tr>
       `;
     }).join('');
@@ -364,11 +369,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <table>
               <thead>
                 <tr>
-                  <th style="text-align: left; width: 30%;">ITEM</th>
+                  <th style="text-align: left; width: 48%;">ITEM</th>
                   <th style="text-align: center; width: 8%;">QTY</th>
-                  <th style="text-align: right; width: 20%;">RATE</th>
-                  <th style="text-align: right; width: 20%;">DISC</th>
-                  <th style="text-align: right; width: 22%;">AMT</th>
+                  <th style="text-align: right; width: 15%;">RATE</th>
+                  <th style="text-align: right; width: 14%;">DISC</th>
+                  <th style="text-align: right; width: 15%;">AMT</th>
                 </tr>
               </thead>
               <tbody>
@@ -391,9 +396,13 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             </div>
             <div class="hr"></div>
             <div style="font-size: 8px; text-align: right; font-weight: 800;">PAID BY: ${tx.paymentMethod}</div>
+            <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                * The advance payment for artworks is non-refundable.<br/>
+                * Payments made for printouts or photocopies are non-refundable.<br/>
+                * Exchanges are accepted on the same day only. No refunds will be provided.
+            </div>
             <div class="footer">
-                THANK YOU - VISIT AGAIN<br/>
-                PRASAMA ERP SOLUTIONS
+                THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS
             </div>
           </div>
         </body>
@@ -1027,7 +1036,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     <td className="px-4 py-4 w-[20%]">
                       <div className="flex items-center gap-2 text-slate-500">
                         <span className="text-lg">🏪</span>
-                        <span className={`text-[9px] font-black uppercase tracking-wide truncate ${normalizeBranch(tx.branchId) === 'CASHIER 2' ? 'text-orange-600' : ''}`}>{normalizeBranch(tx.branchId)}</span>
+                        <span className={`text-[9px] font-black uppercase tracking-wide truncate ${normalizeBranch(tx.branchId) === 'CASHIER 3' ? 'bg-yellow-400 text-black px-2 py-1 rounded shadow-sm' :
+                          normalizeBranch(tx.branchId) === 'CASHIER 2' ? 'text-orange-600' : ''
+                          }`}>{normalizeBranch(tx.branchId)}</span>
                       </div>
                     </td>
 
@@ -1045,11 +1056,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                         </div>
                       )}
 
-                      {tx.branchId && (
-                        <div className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-1 text-right">
-                          {normalizeBranch(tx.branchId)}
-                        </div>
-                      )}
+                      <div className={`text-[9px] font-black uppercase tracking-widest mt-1 text-right ${normalizeBranch(tx.branchId) === 'CASHIER 3' ? 'text-yellow-500' :
+                        normalizeBranch(tx.branchId) === 'CASHIER 2' ? 'text-orange-600' : 'text-slate-300'
+                        }`}>
+                        {normalizeBranch(tx.branchId)}
+                      </div>
                     </td>
 
                     <td className="px-4 py-4 w-[10%] text-right">

@@ -18,7 +18,7 @@ const topUpIcons: Record<string, string> = {
     'HUTCH': '🟧'
 };
 
-const Reload: React.FC<ReloadProps> = ({ products, userProfile, transactions, customers, onCompleteSale }) => {
+const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, transactions, customers, onCompleteSale }) => {
     const [provider, setProvider] = useState<string>('DIALOG');
     const [phoneNumber, setPhoneNumber] = useState('');
     const [amount, setAmount] = useState('');
@@ -39,16 +39,35 @@ const Reload: React.FC<ReloadProps> = ({ products, userProfile, transactions, cu
         { id: 'HUTCH', color: 'bg-[#ff9800]', hover: 'hover:bg-[#f57c00]', label: 'Hutch', icon: '🟧' }
     ];
 
+    const normalizeBranch = (b?: string): string => {
+        if (!b) return 'CASHIER 1';
+        const upper = b.trim().toUpperCase();
+        if (upper === 'LOCAL NODE' || upper === 'BOOKSHOP' || upper === 'SHOP 2' || upper === 'MAIN BRANCH' || upper === 'NO 16,KIRULAPANA SUPERMARKET ,COLOMBO 05') {
+            return 'CASHIER 1';
+        }
+        return b;
+    };
+
+    const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
+        const pName = (product?.name || "").toUpperCase();
+        const cName = (category?.name || "").toUpperCase();
+        const pId = (item.productId || "").toUpperCase();
+        const desc = txDescription.toUpperCase();
+
+        return cName.includes('RELOAD') ||
+            pName.includes('RELOAD') ||
+            pId.includes('RELOAD') ||
+            desc.includes('RELOAD') ||
+            pName.includes('DIALOG') || pName.includes('MOBITEL') || pName.includes('AIRTEL') || pName.includes('HUTCH') ||
+            cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
+    };
+
     const handleProcessReload = () => {
         const reloadAmount = parseFloat(amount);
         if (!reloadAmount || reloadAmount <= 0) {
             alert("Invalid Amount");
             return;
         }
-
-        // Basic validation, maybe strict 10 digits? 
-        // Let's keep it loose but non-empty for now
-
 
         setIsProcessing(true);
 
@@ -60,9 +79,6 @@ const Reload: React.FC<ReloadProps> = ({ products, userProfile, transactions, cu
         // Find existing product for stock deduction
         const targetName = `RELOAD ${provider}`;
         const existingProduct = products.find(p => p.name === targetName);
-
-        // If product doesn't exist, we use a fallback ID format, but stock deduction in App.tsx might skip it.
-        // Ideally, the user should have created these products in Inventory.
         const productId = existingProduct ? existingProduct.id : `RELOAD-${provider}`;
 
         const reloadItem = {
@@ -286,66 +302,101 @@ const Reload: React.FC<ReloadProps> = ({ products, userProfile, transactions, cu
         return prod ? prod.stock : 0;
     };
 
-    // Filter recent reload transactions
-    const recentReloads = transactions
-        .filter(t => t.type === 'SALE' && (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD'))))
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 10);
+    // Filter recent reload transactions - Branch Aware
+    const recentReloads = useMemo(() => {
+        return transactions
+            .filter(t => {
+                const isReload = t.type === 'SALE' && (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD')));
+                const branchMatch = normalizeBranch(t.branchId) === normalizeBranch(userProfile.branch);
+                return isReload && branchMatch;
+            })
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 10);
+    }, [transactions, userProfile.branch, categories, products]);
 
-    // Calculate chart data - group by date and provider
+    // Calculate chart data - group by date and provider - Branch and Provider Aware
     const chartData = useMemo(() => {
-        const reloadTransactions = transactions.filter(t =>
-            t.type === 'SALE' &&
-            (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD')))
-        );
-
         // Group by date and provider
         const dateMap: Record<string, { dialog: number; mobitel: number; airtel: number; hutch: number }> = {};
 
-        reloadTransactions.forEach(t => {
+        // Use last 30 days for consistency with KPI
+        const dates: string[] = [];
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().split('T')[0];
+            dateMap[dateStr] = { dialog: 0, mobitel: 0, airtel: 0, hutch: 0 };
+            dates.push(dateStr);
+        }
+
+        transactions.forEach(t => {
             const date = t.date.split('T')[0];
-            const desc = (t.description || '').toUpperCase();
-            const amount = Number(t.amount || 0);
+            if (!dateMap.hasOwnProperty(date)) return;
 
-            if (!dateMap[date]) {
-                dateMap[date] = { dialog: 0, mobitel: 0, airtel: 0, hutch: 0 };
-            }
+            // Branch filter
+            if (normalizeBranch(t.branchId) !== normalizeBranch(userProfile.branch)) return;
 
-            // Determine provider from description
-            if (desc.includes('DIALOG')) {
-                dateMap[date].dialog += amount;
-            } else if (desc.includes('MOBITEL')) {
-                dateMap[date].mobitel += amount;
-            } else if (desc.includes('AIRTEL')) {
-                dateMap[date].airtel += amount;
-            } else if (desc.includes('HUTCH')) {
-                dateMap[date].hutch += amount;
+            if (t.type === 'SALE') {
+                const desc = (t.description || '').toUpperCase();
+
+                if (t.items) {
+                    t.items.forEach(i => {
+                        const p = products.find(prod => prod.id === i.productId);
+                        const category = categories.find(c => c.id === p?.categoryId);
+
+                        if (isReloadItem(i, p, category, t.description)) {
+                            const amount = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
+                            const pName = (p?.name || '').toUpperCase();
+
+                            if (desc.includes('DIALOG') || pName.includes('DIALOG')) {
+                                dateMap[date].dialog += amount;
+                            } else if (desc.includes('MOBITEL') || pName.includes('MOBITEL')) {
+                                dateMap[date].mobitel += amount;
+                            } else if (desc.includes('AIRTEL') || pName.includes('AIRTEL')) {
+                                dateMap[date].airtel += amount;
+                            } else if (desc.includes('HUTCH') || pName.includes('HUTCH')) {
+                                dateMap[date].hutch += amount;
+                            } else {
+                                dateMap[date].dialog += amount;
+                            }
+                        }
+                    });
+                } else {
+                    // Fallback for transactions without items
+                    if (desc.includes('RELOAD')) {
+                        const amount = Number(t.amount || 0);
+                        if (desc.includes('DIALOG')) dateMap[date].dialog += amount;
+                        else if (desc.includes('MOBITEL')) dateMap[date].mobitel += amount;
+                        else if (desc.includes('AIRTEL')) dateMap[date].airtel += amount;
+                        else if (desc.includes('HUTCH')) dateMap[date].hutch += amount;
+                        else dateMap[date].dialog += amount;
+                    }
+                }
             }
         });
 
-        // Convert to array and sort by date
-        return Object.entries(dateMap)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([date, providers]) => ({
-                date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                dialog: Math.round(providers.dialog),
-                mobitel: Math.round(providers.mobitel),
-                airtel: Math.round(providers.airtel),
-                hutch: Math.round(providers.hutch)
-            }));
-    }, [transactions]);
+        // Convert to array in chronological order
+        return dates.map(date => ({
+            date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            dialog: Math.round(dateMap[date].dialog),
+            mobitel: Math.round(dateMap[date].mobitel),
+            airtel: Math.round(dateMap[date].airtel),
+            hutch: Math.round(dateMap[date].hutch)
+        }));
+    }, [transactions, userProfile.branch, products, categories]);
 
-    // History Checker Logic
+    // History Checker Logic - Branch Aware
     const historyReloads = useMemo(() => {
         return transactions
             .filter(t => {
                 const isReload = t.type === 'SALE' && (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD')));
                 const tDate = t.date.split('T')[0];
                 const isWithinRange = tDate >= historyStartDate && tDate <= historyEndDate;
-                return isReload && isWithinRange;
+                const branchMatch = normalizeBranch(t.branchId) === normalizeBranch(userProfile.branch);
+                return isReload && isWithinRange && branchMatch;
             })
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [transactions, historyStartDate, historyEndDate]);
+    }, [transactions, historyStartDate, historyEndDate, userProfile.branch]);
 
     return (
         <div className="h-full flex flex-col gap-6 p-4">

@@ -12,11 +12,11 @@ interface SalesHistoryProps {
   onDeleteTransaction: (id: string) => void;
 }
 
-const SalesHistory: React.FC<SalesHistoryProps> = ({ 
-  transactions = [], 
-  products = [], 
-  customers = [], 
-  userProfile, 
+const SalesHistory: React.FC<SalesHistoryProps> = ({
+  transactions = [],
+  products = [],
+  customers = [],
+  userProfile,
   accounts = [],
   onUpdateTransaction,
   onDeleteTransaction
@@ -27,17 +27,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   };
 
   const today = getTodayLocal();
-  
+
   const [searchTerm, setSearchTerm] = useState('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [activeTab, setActiveTab] = useState<'ALL' | 'PAID' | 'DUE'>('ALL');
-  
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [tempItems, setTempItems] = useState<{ productId: string; quantity: number; price: number; discount?: number }[]>([]);
   const [tempTotal, setTempTotal] = useState(0);
-  
+
   const [showItemPicker, setShowItemPicker] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
 
@@ -63,10 +63,10 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         const txId = (s.id || "").toLowerCase();
         const search = searchTerm.toLowerCase();
         const matchesSearch = txId.includes(search);
-        
+
         const txDateStr = typeof s.date === 'string' ? s.date.split('T')[0] : '';
         const matchesRange = (!startDate || txDateStr >= startDate) && (!endDate || txDateStr <= endDate);
-        
+
         const isDue = s.paymentMethod === 'CREDIT';
         const matchesTab = activeTab === 'ALL' || (activeTab === 'PAID' && !isDue) || (activeTab === 'DUE' && isDue);
 
@@ -91,17 +91,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     if (filteredEntries.length === 0) return;
 
     const headers = [
-      'Date', 
-      'Reference', 
-      'Customer', 
-      'Item Name', 
-      'SKU', 
-      'Qty', 
-      'Unit Price', 
-      'Line Discount', 
-      'Line Net', 
-      'Tx Total Amount', 
-      'Type', 
+      'Date',
+      'Reference',
+      'Customer',
+      'Item Name',
+      'SKU',
+      'Qty',
+      'Unit Price',
+      'Line Discount',
+      'Line Net',
+      'Tx Total Amount',
+      'Type',
       'Method'
     ];
 
@@ -175,8 +175,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const summaryStats = useMemo(() => {
     const rangeEntries = ledgerEntries.filter(s => {
-        const txDateStr = typeof s.date === 'string' ? s.date.split('T')[0] : '';
-        return (!startDate || txDateStr >= startDate) && (!endDate || txDateStr <= endDate);
+      const txDateStr = typeof s.date === 'string' ? s.date.split('T')[0] : '';
+      return (!startDate || txDateStr >= startDate) && (!endDate || txDateStr <= endDate);
     });
 
     const costOfRevenue = rangeEntries
@@ -211,7 +211,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   const handleUpdateItemField = (index: number, field: string, value: string) => {
     const newItems = [...tempItems];
     const numVal = parseFloat(value) || 0;
-    
+
     newItems[index] = { ...newItems[index], [field]: numVal };
     setTempItems(newItems);
     setTempTotal(calculateTempTotal(newItems));
@@ -235,7 +235,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     e.preventDefault();
     if (!editingTx) return;
     const fd = new FormData(e.currentTarget);
-    
+
     const updated: Transaction = {
       ...editingTx,
       date: new Date(fd.get('date') as string).toISOString(),
@@ -258,7 +258,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     if (!printWindow) return;
 
     if (tx.type === 'CREDIT_PAYMENT') {
-        printWindow.document.write(`
+      printWindow.document.write(`
             <html>
                 <body onload="window.print(); window.close();" style="font-family: 'JetBrains Mono', monospace; text-align: center; width: 72mm; padding: 4px; box-sizing: border-box; font-size: 9px;">
                     <h3 style="margin: 1px 0; text-transform: uppercase;">${userProfile.name}</h3>
@@ -271,12 +271,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     <h2 style="margin: 4px 0; font-size: 14px;">Rs. ${Number(tx.amount).toLocaleString()}</h2>
                     <p style="margin: 1px 0; text-align: right; font-weight: 800;">BY: ${tx.paymentMethod}</p>
                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    <p style="font-size: 8px; font-weight: 800; margin-top: 8px;">PRASAMA ERP SOLUTIONS</p>
+                    <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                        * The advance payment for artworks is non-refundable.<br/>
+                        * Payments made for printouts or photocopies are non-refundable.<br/>
+                        * Exchanges are accepted on the same day only. No refunds will be provided.
+                    </div>
+                    <p style="font-size: 8px; font-weight: 800; margin-top: 8px;">THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS</p>
                 </body>
             </html>
         `);
-        printWindow.document.close();
-        return;
+      printWindow.document.close();
+      return;
     }
 
     const logoHtml = userProfile.logo
@@ -290,11 +295,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const rowNet = (item.quantity * item.price) - (item.discount || 0);
       return `
         <tr>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${product?.name || 'Item'}</td>
           <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 8%; text-align: center;">${item.quantity}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">${Number(item.price).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 20%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
-          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 22%; text-align: right;">${rowNet.toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${Number(item.price).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 14%; text-align: right;">-${(item.discount || 0).toLocaleString()}</td>
+          <td style="padding: 2px 0; font-size: 9px; font-weight: 800; width: 15%; text-align: right;">${rowNet.toLocaleString()}</td>
         </tr>
       `;
     }).join('');
@@ -350,11 +355,11 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <table>
               <thead>
                 <tr>
-                  <th style="text-align: left; width: 30%;">ITEM</th>
+                  <th style="text-align: left; width: 48%;">ITEM</th>
                   <th style="text-align: center; width: 8%;">QTY</th>
-                  <th style="text-align: right; width: 20%;">RATE</th>
-                  <th style="text-align: right; width: 20%;">DISC</th>
-                  <th style="text-align: right; width: 22%;">AMT</th>
+                  <th style="text-align: right; width: 15%;">RATE</th>
+                  <th style="text-align: right; width: 14%;">DISC</th>
+                  <th style="text-align: right; width: 15%;">AMT</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,9 +382,13 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             </div>
             <div class="hr"></div>
             <div style="font-size: 8px; text-align: right; font-weight: 800;">PAID BY: ${tx.paymentMethod}</div>
+            <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                * The advance payment for artworks is non-refundable.<br/>
+                * Payments made for printouts or photocopies are non-refundable.<br/>
+                * Exchanges are accepted on the same day only. No refunds will be provided.
+            </div>
             <div class="footer">
-                THANK YOU - VISIT AGAIN<br/>
-                PRASAMA ERP SOLUTIONS
+                THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS
             </div>
           </div>
         </body>
@@ -390,8 +399,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const filteredPickerProducts = useMemo(() => {
     if (!itemSearch.trim()) return [];
-    return products.filter(p => 
-      p.name.toLowerCase().includes(itemSearch.toLowerCase()) || 
+    return products.filter(p =>
+      p.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
       p.sku.toLowerCase().includes(itemSearch.toLowerCase())
     ).slice(0, 5);
   }, [products, itemSearch]);
@@ -404,26 +413,26 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Commercial cycle verification</p>
         </div>
         <div className="flex gap-4">
-           <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex gap-10 overflow-x-auto">
-              <div className="text-right shrink-0">
-                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Sales Revenue</p>
-                 <p className="text-xl font-black font-mono text-indigo-600">Rs. {summaryStats.salesRevenue.toLocaleString()}</p>
-                 <p className="text-[10px] font-black uppercase text-emerald-500">Margin: {summaryStats.margin.toFixed(1)}%</p>
-              </div>
-              <div className="text-right border-l border-slate-100 pl-10 shrink-0">
-                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Profit</p>
-                 <p className="text-xl font-black font-mono text-emerald-600">Rs. {summaryStats.profit.toLocaleString()}</p>
-                 <p className="text-[10px] font-black uppercase text-indigo-500">Yield/ROI: {summaryStats.roi.toFixed(1)}%</p>
-              </div>
-              <div className="text-right border-l border-slate-100 pl-10 shrink-0">
-                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Cost of Revenue</p>
-                 <p className="text-xl font-black font-mono text-slate-600">Rs. {summaryStats.costOfRevenue.toLocaleString()}</p>
-              </div>
-              <div className="text-right border-l border-slate-100 pl-10 shrink-0">
-                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">New Unsettled Credit</p>
-                 <p className="text-xl font-black font-mono text-rose-600">Rs. {summaryStats.dueAmount.toLocaleString()}</p>
-              </div>
-           </div>
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex gap-10 overflow-x-auto">
+            <div className="text-right shrink-0">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Sales Revenue</p>
+              <p className="text-xl font-black font-mono text-indigo-600">Rs. {summaryStats.salesRevenue.toLocaleString()}</p>
+              <p className="text-[10px] font-black uppercase text-emerald-500">Margin: {summaryStats.margin.toFixed(1)}%</p>
+            </div>
+            <div className="text-right border-l border-slate-100 pl-10 shrink-0">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Profit</p>
+              <p className="text-xl font-black font-mono text-emerald-600">Rs. {summaryStats.profit.toLocaleString()}</p>
+              <p className="text-[10px] font-black uppercase text-indigo-500">Yield/ROI: {summaryStats.roi.toFixed(1)}%</p>
+            </div>
+            <div className="text-right border-l border-slate-100 pl-10 shrink-0">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Cost of Revenue</p>
+              <p className="text-xl font-black font-mono text-slate-600">Rs. {summaryStats.costOfRevenue.toLocaleString()}</p>
+            </div>
+            <div className="text-right border-l border-slate-100 pl-10 shrink-0">
+              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">New Unsettled Credit</p>
+              <p className="text-xl font-black font-mono text-rose-600">Rs. {summaryStats.dueAmount.toLocaleString()}</p>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -432,20 +441,20 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 items-center">
             <div className="relative flex-1 w-full">
               <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
-              <input 
-                type="text" 
-                placeholder="Search by Transaction ID..." 
-                className="w-full pl-14 pr-6 py-4 rounded-2xl border border-slate-200 outline-none bg-slate-50/50 font-bold text-sm focus:border-indigo-500 transition-all" 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+              <input
+                type="text"
+                placeholder="Search by Transaction ID..."
+                className="w-full pl-14 pr-6 py-4 rounded-2xl border border-slate-200 outline-none bg-slate-50/50 font-bold text-sm focus:border-indigo-500 transition-all"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <div className="flex gap-3 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
               <input type="date" className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none" value={startDate} onChange={e => setStartDate(e.target.value)} />
               <input type="date" className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none" value={endDate} onChange={e => setEndDate(e.target.value)} />
               <button onClick={resetFilters} className="px-4 py-4 rounded-2xl border border-slate-200 bg-slate-50 text-[10px] font-black uppercase hover:bg-slate-100 transition-all" title="Reset All Filters">↺ Reset</button>
-              <button 
-                onClick={handleExportCSV} 
+              <button
+                onClick={handleExportCSV}
                 disabled={filteredEntries.length === 0}
                 className="px-6 py-4 rounded-2xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 hover:bg-indigo-700 disabled:opacity-30 transition-all whitespace-nowrap"
               >
@@ -476,40 +485,40 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                       <td className="px-8 py-4">
                         <p className="font-black text-slate-700 uppercase text-[11px] mb-2">{getCustomerName(tx.customerId)}</p>
                         <div className="space-y-1.5 border-l-2 border-slate-100 pl-3">
-                           {tx.items && tx.items.length > 0 ? (
-                             tx.items.map((it, idx) => {
-                               const p = products.find(prod => prod.id === it.productId);
-                               return (
-                                 <div key={idx} className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-400 leading-none">
-                                    <span className="w-4 h-4 rounded bg-slate-100 flex items-center justify-center text-[7px] text-slate-600 font-bold shrink-0">{it.quantity}</span>
-                                    <span className="truncate max-w-[140px]">{p?.name || 'Asset'}</span>
-                                    <span className="ml-auto text-slate-300 font-mono text-[8px]">@ {Number(it.price).toLocaleString()}</span>
-                                 </div>
-                               );
-                             })
-                           ) : (
-                             <p className="text-[9px] text-slate-400 font-bold uppercase truncate max-w-[200px] italic">{tx.description}</p>
-                           )}
+                          {tx.items && tx.items.length > 0 ? (
+                            tx.items.map((it, idx) => {
+                              const p = products.find(prod => prod.id === it.productId);
+                              return (
+                                <div key={idx} className="flex items-center gap-2 text-[9px] font-black uppercase text-slate-400 leading-none">
+                                  <span className="w-4 h-4 rounded bg-slate-100 flex items-center justify-center text-[7px] text-slate-600 font-bold shrink-0">{it.quantity}</span>
+                                  <span className="truncate max-w-[140px]">{p?.name || 'Asset'}</span>
+                                  <span className="ml-auto text-slate-300 font-mono text-[8px]">@ {Number(it.price).toLocaleString()}</span>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <p className="text-[9px] text-slate-400 font-bold uppercase truncate max-w-[200px] italic">{tx.description}</p>
+                          )}
                         </div>
                       </td>
                       <td className="px-8 py-4 text-right font-black text-slate-900 font-mono text-[13px]">
                         {Number(tx.amount || 0).toLocaleString()}
                       </td>
                       <td className="px-8 py-4">
-                         <div className="flex flex-col gap-1">
-                            <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest self-start ${tx.type?.toUpperCase() === 'SALE' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                                {tx.type}
-                            </span>
-                            <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest self-start ${tx.paymentMethod === 'CREDIT' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-600'}`}>
-                                {tx.paymentMethod}
-                            </span>
-                         </div>
+                        <div className="flex flex-col gap-1">
+                          <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest self-start ${tx.type?.toUpperCase() === 'SALE' ? 'bg-indigo-50 text-indigo-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                            {tx.type}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest self-start ${tx.paymentMethod === 'CREDIT' ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-600'}`}>
+                            {tx.paymentMethod}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-8 py-4 text-center">
                         <div className="flex justify-center gap-2">
                           <button onClick={() => { setEditingTx(tx); setIsEditModalOpen(true); }} className="p-2.5 rounded-xl border border-slate-200 hover:bg-white hover:text-indigo-600 transition-all shadow-sm" title="Edit Entry">✏️</button>
                           <button onClick={() => handlePrintReceipt(tx)} className="p-2.5 rounded-xl border border-slate-200 hover:bg-white hover:text-indigo-600 transition-all shadow-sm" title="Print Receipt">🖨️</button>
-                          <button onClick={() => { if(confirm("Confirm deletion of this record?")) onDeleteTransaction(tx.id); }} className="p-2.5 rounded-xl border border-slate-200 hover:bg-rose-50 hover:text-rose-600 transition-all shadow-sm">🗑️</button>
+                          <button onClick={() => { if (confirm("Confirm deletion of this record?")) onDeleteTransaction(tx.id); }} className="p-2.5 rounded-xl border border-slate-200 hover:bg-rose-50 hover:text-rose-600 transition-all shadow-sm">🗑️</button>
                         </div>
                       </td>
                     </tr>
@@ -526,161 +535,161 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         </div>
 
         <div className="space-y-6">
-           <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-slate-800">
-              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-6">Filter by Status</h3>
-              <div className="space-y-2">
-                 {[
-                   { id: 'ALL', label: 'Complete Ledger', icon: '📊' },
-                   { id: 'PAID', label: 'Realized Revenue', icon: '💰' },
-                   { id: 'DUE', label: 'Unsettled Credit', icon: '⏳' }
-                 ].map(tab => (
-                   <button 
-                     key={tab.id} 
-                     onClick={() => setActiveTab(tab.id as any)}
-                     className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'}`}
-                   >
-                     <span className="text-lg">{tab.icon}</span>
-                     {tab.label}
-                   </button>
-                 ))}
-              </div>
-           </div>
+          <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-xl border border-slate-800">
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-6">Filter by Status</h3>
+            <div className="space-y-2">
+              {[
+                { id: 'ALL', label: 'Complete Ledger', icon: '📊' },
+                { id: 'PAID', label: 'Realized Revenue', icon: '💰' },
+                { id: 'DUE', label: 'Unsettled Credit', icon: '⏳' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'}`}
+                >
+                  <span className="text-lg">{tab.icon}</span>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Edit Transaction Modal */}
       {isEditModalOpen && editingTx && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-           <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in duration-300 max-h-[95vh] flex flex-col">
-              <div className="p-8 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-                 <div>
-                    <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Edit Record</h3>
-                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1">Ref: {editingTx.id} ({editingTx.type})</p>
-                 </div>
-                 <button onClick={() => { setIsEditModalOpen(false); setEditingTx(null); setShowItemPicker(false); }} className="text-slate-300 hover:text-slate-900 text-4xl leading-none transition-colors">&times;</button>
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in duration-300 max-h-[95vh] flex flex-col">
+            <div className="p-8 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Edit Record</h3>
+                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1">Ref: {editingTx.id} ({editingTx.type})</p>
               </div>
-              
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
-                <form onSubmit={handleUpdate} className="space-y-6">
-                   <div className="grid grid-cols-2 gap-6">
-                      <div className="space-y-1">
-                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Entry Date</label>
-                         <input name="date" type="date" required className="w-full px-5 py-3 rounded-xl border border-slate-200 font-bold text-xs" defaultValue={editingTx.date.split('T')[0]} />
+              <button onClick={() => { setIsEditModalOpen(false); setEditingTx(null); setShowItemPicker(false); }} className="text-slate-300 hover:text-slate-900 text-4xl leading-none transition-colors">&times;</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+              <form onSubmit={handleUpdate} className="space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Entry Date</label>
+                    <input name="date" type="date" required className="w-full px-5 py-3 rounded-xl border border-slate-200 font-bold text-xs" defaultValue={editingTx.date.split('T')[0]} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Revenue (Rs.)</label>
+                    <input name="amount" type="number" step="0.01" required={editingTx.type !== 'SALE'} readOnly={editingTx.type === 'SALE'} className={`w-full px-5 py-3 rounded-xl border border-slate-200 font-black font-mono text-sm text-indigo-600 ${editingTx.type === 'SALE' ? 'bg-slate-50' : 'bg-white'}`} value={editingTx.type === 'SALE' ? tempTotal : undefined} defaultValue={editingTx.type !== 'SALE' ? editingTx.amount : undefined} />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Audit Description / Memo</label>
+                  <input name="description" required className="w-full px-5 py-3 rounded-xl border border-slate-200 font-bold uppercase text-xs" defaultValue={editingTx.description} />
+                </div>
+
+                {editingTx.type?.toUpperCase() === 'SALE' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                      <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Transaction Manifest</h4>
+                      <button type="button" onClick={() => setShowItemPicker(!showItemPicker)} className="text-[9px] font-black text-indigo-600 uppercase bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-all">+ Add Asset</button>
+                    </div>
+
+                    {showItemPicker && (
+                      <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-4 animate-in slide-in-from-top-2">
+                        <input
+                          autoFocus
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-indigo-500"
+                          placeholder="SEARCH CATALOG TO ADD..."
+                          value={itemSearch}
+                          onChange={e => setItemSearch(e.target.value)}
+                        />
+                        <div className="grid grid-cols-1 gap-2">
+                          {filteredPickerProducts.map(p => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => handleAddItemToManifest(p)}
+                              className="flex justify-between items-center p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all text-left"
+                            >
+                              <span className="text-[10px] font-black text-white uppercase">{p.name}</span>
+                              <span className="text-[9px] font-black text-indigo-400">Rs. {p.price.toLocaleString()}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      <div className="space-y-1">
-                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Revenue (Rs.)</label>
-                         <input name="amount" type="number" step="0.01" required={editingTx.type !== 'SALE'} readOnly={editingTx.type === 'SALE'} className={`w-full px-5 py-3 rounded-xl border border-slate-200 font-black font-mono text-sm text-indigo-600 ${editingTx.type === 'SALE' ? 'bg-slate-50' : 'bg-white'}`} value={editingTx.type === 'SALE' ? tempTotal : undefined} defaultValue={editingTx.type !== 'SALE' ? editingTx.amount : undefined} />
-                      </div>
-                   </div>
+                    )}
 
-                   <div className="space-y-1">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Audit Description / Memo</label>
-                      <input name="description" required className="w-full px-5 py-3 rounded-xl border border-slate-200 font-bold uppercase text-xs" defaultValue={editingTx.description} />
-                   </div>
-
-                   {editingTx.type?.toUpperCase() === 'SALE' && (
-                       <div className="space-y-4">
-                          <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                             <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Transaction Manifest</h4>
-                             <button type="button" onClick={() => setShowItemPicker(!showItemPicker)} className="text-[9px] font-black text-indigo-600 uppercase bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-all">+ Add Asset</button>
-                          </div>
-
-                          {showItemPicker && (
-                            <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-4 animate-in slide-in-from-top-2">
-                               <input 
-                                 autoFocus
-                                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-xs font-bold text-white outline-none focus:border-indigo-500" 
-                                 placeholder="SEARCH CATALOG TO ADD..." 
-                                 value={itemSearch}
-                                 onChange={e => setItemSearch(e.target.value)}
-                               />
-                               <div className="grid grid-cols-1 gap-2">
-                                  {filteredPickerProducts.map(p => (
-                                    <button 
-                                      key={p.id} 
-                                      type="button"
-                                      onClick={() => handleAddItemToManifest(p)}
-                                      className="flex justify-between items-center p-3 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all text-left"
-                                    >
-                                       <span className="text-[10px] font-black text-white uppercase">{p.name}</span>
-                                       <span className="text-[9px] font-black text-indigo-400">Rs. {p.price.toLocaleString()}</span>
-                                    </button>
-                                  ))}
-                               </div>
+                    <div className="space-y-2">
+                      {tempItems.map((item, idx) => {
+                        const product = products.find(p => p.id === item.productId);
+                        return (
+                          <div key={idx} className="grid grid-cols-12 gap-3 items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-100 transition-all">
+                            <div className="col-span-4 min-w-0">
+                              <p className="text-[11px] font-black text-slate-800 uppercase truncate leading-tight">{product?.name || 'Asset'}</p>
+                              <p className="text-[9px] font-bold text-slate-400 font-mono">{product?.sku}</p>
                             </div>
-                          )}
-
-                          <div className="space-y-2">
-                            {tempItems.map((item, idx) => {
-                              const product = products.find(p => p.id === item.productId);
-                              return (
-                                <div key={idx} className="grid grid-cols-12 gap-3 items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-100 transition-all">
-                                   <div className="col-span-4 min-w-0">
-                                      <p className="text-[11px] font-black text-slate-800 uppercase truncate leading-tight">{product?.name || 'Asset'}</p>
-                                      <p className="text-[9px] font-bold text-slate-400 font-mono">{product?.sku}</p>
-                                   </div>
-                                   <div className="col-span-2">
-                                      <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Qty</label>
-                                      <input 
-                                        type="number" 
-                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-center bg-white" 
-                                        value={item.quantity} 
-                                        onChange={e => handleUpdateItemField(idx, 'quantity', e.target.value)}
-                                      />
-                                   </div>
-                                   <div className="col-span-2">
-                                      <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Price</label>
-                                      <input 
-                                        type="number" 
-                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-indigo-600 text-right bg-white" 
-                                        value={item.price} 
-                                        onChange={e => handleUpdateItemField(idx, 'price', e.target.value)}
-                                      />
-                                   </div>
-                                   <div className="col-span-2">
-                                      <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Disc (Rs.)</label>
-                                      <input 
-                                        type="number" 
-                                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-emerald-600 text-right bg-white" 
-                                        value={item.discount || 0} 
-                                        onChange={e => handleUpdateItemField(idx, 'discount', e.target.value)}
-                                      />
-                                   </div>
-                                   <div className="col-span-1 text-right">
-                                      <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Subtotal</label>
-                                      <p className="text-[10px] font-black font-mono text-slate-900">{(item.quantity * item.price - (item.discount || 0)).toLocaleString()}</p>
-                                   </div>
-                                   <div className="col-span-1 flex justify-end">
-                                      <button type="button" onClick={() => handleRemoveItemFromManifest(idx)} className="w-8 h-8 rounded-lg bg-rose-50 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center">✕</button>
-                                   </div>
-                                </div>
-                              );
-                            })}
+                            <div className="col-span-2">
+                              <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Qty</label>
+                              <input
+                                type="number"
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-center bg-white"
+                                value={item.quantity}
+                                onChange={e => handleUpdateItemField(idx, 'quantity', e.target.value)}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Price</label>
+                              <input
+                                type="number"
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-indigo-600 text-right bg-white"
+                                value={item.price}
+                                onChange={e => handleUpdateItemField(idx, 'price', e.target.value)}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Disc (Rs.)</label>
+                              <input
+                                type="number"
+                                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[10px] text-emerald-600 text-right bg-white"
+                                value={item.discount || 0}
+                                onChange={e => handleUpdateItemField(idx, 'discount', e.target.value)}
+                              />
+                            </div>
+                            <div className="col-span-1 text-right">
+                              <label className="block text-[7px] font-black text-slate-400 uppercase mb-1">Subtotal</label>
+                              <p className="text-[10px] font-black font-mono text-slate-900">{(item.quantity * item.price - (item.discount || 0)).toLocaleString()}</p>
+                            </div>
+                            <div className="col-span-1 flex justify-end">
+                              <button type="button" onClick={() => handleRemoveItemFromManifest(idx)} className="w-8 h-8 rounded-lg bg-rose-50 text-rose-300 hover:text-rose-600 transition-colors flex items-center justify-center">✕</button>
+                            </div>
                           </div>
-                       </div>
-                   )}
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-                   <div className="grid grid-cols-2 gap-6">
-                      <div className="space-y-1">
-                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Settlement Pipe</label>
-                         <select name="paymentMethod" className="w-full px-5 py-3 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white" defaultValue={editingTx.paymentMethod}>
-                            {['CASH', 'BANK', 'CARD', 'CREDIT', 'CHEQUE'].map(m => <option key={m} value={m}>{m}</option>)}
-                         </select>
-                      </div>
-                      <div className="space-y-1">
-                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Asset Node (Account)</label>
-                         <select name="accountId" className="w-full px-5 py-3 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white" defaultValue={editingTx.accountId}>
-                            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                         </select>
-                      </div>
-                   </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Settlement Pipe</label>
+                    <select name="paymentMethod" className="w-full px-5 py-3 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white" defaultValue={editingTx.paymentMethod}>
+                      {['CASH', 'BANK', 'CARD', 'CREDIT', 'CHEQUE'].map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Asset Node (Account)</label>
+                    <select name="accountId" className="w-full px-5 py-3 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white" defaultValue={editingTx.accountId}>
+                      {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
 
-                   <div className="pt-6 border-t border-slate-100 shrink-0">
-                      <button type="submit" className="w-full bg-slate-950 text-white font-black py-4 rounded-xl uppercase text-[10px] tracking-widest shadow-xl hover:bg-black transition-all">Update Commercial Ledger</button>
-                   </div>
-                </form>
-              </div>
-           </div>
+                <div className="pt-6 border-t border-slate-100 shrink-0">
+                  <button type="submit" className="w-full bg-slate-950 text-white font-black py-4 rounded-xl uppercase text-[10px] tracking-widest shadow-xl hover:bg-black transition-all">Update Commercial Ledger</button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
     </div>

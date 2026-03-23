@@ -49,6 +49,16 @@ const KPI: React.FC<KPIProps> = ({
         return b;
     };
 
+    // Helper to get reload commission rate based on provider
+    const getReloadRate = (txDescription: string = '', productName: string = '') => {
+        const desc = txDescription.toUpperCase();
+        const name = productName.toUpperCase();
+        const isMobitelOrHutch =
+            desc.includes('MOBITEL') || desc.includes('HUTCH') ||
+            name.includes('MOBITEL') || name.includes('HUTCH');
+        return isMobitelOrHutch ? 0.06 : 0.04;
+    };
+
     // Helper to identify a reload item robustly
     const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
         const pName = (product?.name || "").toUpperCase();
@@ -92,7 +102,7 @@ const KPI: React.FC<KPIProps> = ({
                     const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
                     if (isReloadItem(item, product, category, t.description)) {
-                        return itemAcc + (lineTotal * 0.04);
+                        return itemAcc + (lineTotal * getReloadRate(t.description, product?.name));
                     }
                     return itemAcc + lineTotal;
                 }, 0);
@@ -167,7 +177,7 @@ const KPI: React.FC<KPIProps> = ({
                     const category = categories.find(c => c.id === catId);
 
                     const lineTotal = i.quantity * i.price; // Gross
-                    const value = isReloadItem(i, p, category, t.description) ? lineTotal * 0.04 : lineTotal;
+                    const value = isReloadItem(i, p, category, t.description) ? lineTotal * getReloadRate(t.description, p?.name) : lineTotal;
 
                     catMap[catName] = (catMap[catName] || 0) + value;
                 }
@@ -221,7 +231,7 @@ const KPI: React.FC<KPIProps> = ({
                         const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
                         if (isReloadItem(item, product, category, t.description)) {
-                            hours[hour].reloadRevenue += (lineTotal * 0.04);
+                            hours[hour].reloadRevenue += (lineTotal * getReloadRate(t.description, product?.name));
                         } else {
                             hours[hour].generalRevenue += lineTotal;
                         }
@@ -267,7 +277,7 @@ const KPI: React.FC<KPIProps> = ({
                         const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
                         if (isReloadItem(i, p, category, t.description)) {
-                            stats[tDate] += (lineTotal * 0.04);
+                            stats[tDate] += (lineTotal * getReloadRate(t.description, p?.name));
                         } else {
                             const cost = Number(p?.cost || 0) * Number(i.quantity);
                             stats[tDate] += (lineTotal - cost);
@@ -326,7 +336,7 @@ const KPI: React.FC<KPIProps> = ({
                         const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
                         if (isReloadItem(i, p, category, t.description)) {
-                            stats[tDate].profit += (lineTotal * 0.04);
+                            stats[tDate].profit += (lineTotal * getReloadRate(t.description, p?.name));
                         } else {
                             const cost = Number(p?.cost || 0) * Number(i.quantity);
                             stats[tDate].profit += (lineTotal - cost);
@@ -384,7 +394,7 @@ const KPI: React.FC<KPIProps> = ({
         const stats: Record<string, { dialog: number; mobitel: number; airtel: number; hutch: number }> = {};
         const dates: string[] = [];
 
-        // Initialize last 30 days
+        // Always show last 30 days (independent of KPI date filter)
         for (let i = 29; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
@@ -413,15 +423,19 @@ const KPI: React.FC<KPIProps> = ({
                         if (isReloadItem(i, p, category, t.description)) {
                             const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
-                            // Determine provider from description
-                            if (desc.includes('DIALOG')) {
+                            // Determine provider from product name first, then description
+                            const pName = (p?.name || '').toUpperCase();
+                            if (desc.includes('DIALOG') || pName.includes('DIALOG')) {
                                 stats[tDate].dialog += lineTotal;
-                            } else if (desc.includes('MOBITEL')) {
+                            } else if (desc.includes('MOBITEL') || pName.includes('MOBITEL')) {
                                 stats[tDate].mobitel += lineTotal;
-                            } else if (desc.includes('AIRTEL')) {
+                            } else if (desc.includes('AIRTEL') || pName.includes('AIRTEL')) {
                                 stats[tDate].airtel += lineTotal;
-                            } else if (desc.includes('HUTCH')) {
+                            } else if (desc.includes('HUTCH') || pName.includes('HUTCH')) {
                                 stats[tDate].hutch += lineTotal;
+                            } else {
+                                // Generic reload — bucket into dialog as fallback
+                                stats[tDate].dialog += lineTotal;
                             }
                         }
                     });
@@ -437,6 +451,8 @@ const KPI: React.FC<KPIProps> = ({
                             stats[tDate].airtel += amount;
                         } else if (desc.includes('HUTCH')) {
                             stats[tDate].hutch += amount;
+                        } else {
+                            stats[tDate].dialog += amount;
                         }
                     }
                 }
@@ -444,7 +460,6 @@ const KPI: React.FC<KPIProps> = ({
         });
 
         return dates.map(date => {
-            const d = new Date(date);
             return {
                 date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
                 dialog: Math.round(stats[date].dialog),

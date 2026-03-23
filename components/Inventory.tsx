@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import JsBarcode from 'jsbarcode';
 import { Product, Category, Vendor, UserProfile } from '../types';
 
 interface InventoryProps {
@@ -54,6 +55,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const [costValue, setCostValue] = useState<number>(0);
   const [priceValue, setPriceValue] = useState<number>(0);
+  const [skuValue, setSkuValue] = useState('');
 
 
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -63,20 +65,60 @@ const Inventory: React.FC<InventoryProps> = ({
   const [viewingCategory, setViewingCategory] = useState<Category | null>(null);
 
   const importInputRef = useRef<HTMLInputElement>(null);
+  const barcodePreviewRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (isModalOpen && barcodePreviewRef.current && skuValue) {
+      try {
+        const isNumeric = /^\d+$/.test(skuValue);
+        const isEAN = skuValue.length === 13 && isNumeric;
+        const isUPC = skuValue.length === 12 && isNumeric;
+        let format = isEAN ? 'EAN13' : (isUPC ? 'UPC' : 'CODE128');
+
+        try {
+          JsBarcode(barcodePreviewRef.current, skuValue, {
+            format: format,
+            width: 1.5,
+            height: 40,
+            displayValue: true,
+            fontSize: 12,
+            margin: 0,
+            background: 'transparent'
+          });
+        } catch(e) {
+          JsBarcode(barcodePreviewRef.current, skuValue, {
+            format: 'CODE128',
+            width: 1.5,
+            height: 40,
+            displayValue: true,
+            fontSize: 12,
+            margin: 0,
+            background: 'transparent'
+          });
+        }
+      } catch (err) {
+        // Fallback or ignore if it can't render
+      }
+    }
+  }, [skuValue, isModalOpen]);
 
   useEffect(() => {
     if (editingProduct) {
       setSelectedCategoryId(editingProduct.categoryId || '');
       setCostValue(editingProduct.cost || 0);
       setPriceValue(editingProduct.price || 0);
+      setSkuValue(editingProduct.sku);
     } else {
       setCostValue(0);
       setPriceValue(0);
       if (categories.length > 0 && !selectedCategoryId) {
         setSelectedCategoryId(categories[0].id);
       }
+      if (isModalOpen) {
+        setSkuValue(getNextSku());
+      }
     }
-  }, [editingProduct, categories]);
+  }, [editingProduct, categories, isModalOpen]);
 
   const handleCostChange = (val: number) => {
     setCostValue(val);
@@ -166,7 +208,7 @@ const Inventory: React.FC<InventoryProps> = ({
     e.preventDefault();
     setSaveStatus('SAVING');
     const formData = new FormData(e.currentTarget);
-    const finalSku = editingProduct ? editingProduct.sku : getNextSku();
+    const finalSku = skuValue.trim() || getNextSku();
 
 
     const bStocks = { ...(editingProduct?.branchStocks || {}) };
@@ -401,7 +443,10 @@ const Inventory: React.FC<InventoryProps> = ({
                   <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
                     <td className="px-10 py-4">
                       <p className="font-black text-slate-900 text-[13px] uppercase mb-1 tracking-tight leading-none">{p.name}</p>
-                      <p className="font-mono text-[10px] font-black text-indigo-500 tracking-tighter opacity-80">{p.sku}</p>
+                      <div className="flex gap-2 items-center">
+                        <p className="font-mono text-[10px] font-black text-indigo-500 tracking-tighter opacity-80">{p.sku}</p>
+                        {p.internalNotes && <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest pl-2 border-l border-slate-200">{p.internalNotes}</span>}
+                      </div>
                     </td>
                     <td className="px-10 py-4">
                       <span className="text-[10px] font-black text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">{getCategoryName(p.categoryId)}</span>
@@ -540,65 +585,78 @@ const Inventory: React.FC<InventoryProps> = ({
           <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-950/95 backdrop-blur-xl overflow-y-auto">
             <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in duration-300 my-8">
               <div className="p-10 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
-                <div>
+                <div className="flex-1">
                   <h3 className="font-black text-2xl text-slate-900 uppercase tracking-tighter">
                     {editingProduct ? 'Update Manifest' : 'Global Asset Intake'}
                   </h3>
                   <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.4em] mt-2">Enterprise Master Synchronization</p>
                 </div>
-                <button
-                  onClick={closeModal}
-                  className="w-12 h-12 flex items-center justify-center rounded-full bg-[#0f172a] text-white hover:bg-rose-600 transition-all text-xl shadow-xl active:scale-90"
-                >
-                  &times;
-                </button>
+                <div className="flex items-center gap-6">
+                  <button
+                    onClick={closeModal}
+                    className="w-12 h-12 shrink-0 flex items-center justify-center rounded-full bg-[#0f172a] text-white hover:bg-rose-600 transition-all text-xl shadow-xl active:scale-90"
+                  >
+                    &times;
+                  </button>
+                </div>
               </div>
 
-              <form onSubmit={handleSaveProduct} className="p-10 space-y-6">
-                <div className="space-y-6">
-                  <div className="space-y-2">
+              <form onSubmit={handleSaveProduct} className="p-8 space-y-4">
+                <div className="space-y-3">
+                  
+                  {/* Generated Barcode Display Positioned Above Nomenclature */}
+                  <div className="flex justify-center items-center w-full py-2 bg-slate-50/50 rounded-2xl border border-slate-100 border-dashed mb-1">
+                     <canvas ref={barcodePreviewRef} className="h-14 w-auto object-contain mix-blend-multiply opacity-90" />
+                  </div>
+                  <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Nomenclature</label>
-                    <input name="name" placeholder="E.G. A4 DOUBLE A 80GSM" defaultValue={editingProduct?.name} required className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black outline-none bg-white text-slate-800 uppercase text-[13px] focus:border-indigo-500 transition-all shadow-sm" />
+                    <input name="name" placeholder="E.G. A4 DOUBLE A 80GSM" defaultValue={editingProduct?.name} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black outline-none bg-white text-slate-800 uppercase text-[13px] focus:border-indigo-500 transition-all shadow-sm" />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Universal SKU (Read-Only)</label>
-                      <input name="sku" placeholder={editingProduct ? editingProduct.sku : "SYSTEM ASSIGNED"} defaultValue={editingProduct?.sku} readOnly className="w-full px-6 py-4 rounded-2xl border border-slate-100 font-mono font-black outline-none uppercase text-[12px] bg-slate-50 text-slate-400 cursor-not-allowed" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Universal SKU (Barcode)</label>
+                      <input
+                        name="sku"
+                        value={skuValue}
+                        onChange={(e) => setSkuValue(e.target.value.toUpperCase())}
+                        placeholder="BARCODE / SKU"
+                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-mono font-black outline-none uppercase text-[12px] bg-white text-slate-800 focus:border-indigo-500 transition-all shadow-sm"
+                      />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <div className="flex justify-between items-center mb-1">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Classification</label>
                         <button type="button" onClick={() => setIsCategoryModalOpen(true)} className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline">+ Manage</button>
                       </div>
-                      <select className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black bg-white outline-none cursor-pointer uppercase text-[12px] focus:border-indigo-500 transition-all" value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}>
+                      <select className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black bg-white outline-none cursor-pointer uppercase text-[12px] focus:border-indigo-500 transition-all" value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}>
                         <option value="">UNCATEGORIZED</option>
                         {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
                       </select>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Unit Cost</label>
-                      <input type="number" step="0.01" value={costValue} onChange={e => handleCostChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-4 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none text-slate-800 bg-white" />
+                      <input type="number" step="0.01" value={costValue} onChange={e => handleCostChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none text-slate-800 bg-white" />
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-right">Selling Price</label>
-                      <input type="number" step="0.01" value={priceValue} onChange={e => handlePriceChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-4 rounded-2xl border border-indigo-200 font-black font-mono text-[14px] text-indigo-700 outline-none text-right bg-white" />
+                      <input type="number" step="0.01" value={priceValue} onChange={e => handlePriceChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-indigo-200 font-black font-mono text-[14px] text-indigo-700 outline-none text-right bg-white" />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Initial Stock ({userProfile.branch})</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Initial Stock ({userProfile.branch})</label>
                       <input
                         name="stock"
                         type="number"
                         defaultValue={editingProduct ? (editingProduct.branchStocks ? (editingProduct.branchStocks[userProfile.branch] || 0) : editingProduct.stock) : 0}
                         required
-                        className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white"
+                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white"
                       />
                       {editingProduct && editingProduct.branchStocks && (() => {
                         const total = Number(Object.values(editingProduct.branchStocks).reduce((acc: number, b) => acc + Number(b || 0), 0));
@@ -654,24 +712,29 @@ const Inventory: React.FC<InventoryProps> = ({
                         return null;
                       })()}
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Alert Threshold</label>
-                      <input name="lowStockThreshold" type="number" defaultValue={editingProduct?.lowStockThreshold || 5} required className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white" />
+                      <input name="lowStockThreshold" type="number" defaultValue={editingProduct?.lowStockThreshold || 5} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white" />
                     </div>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Internal Notes / Extra Details</label>
+                    <textarea name="internalNotes" defaultValue={editingProduct?.internalNotes} rows={2} placeholder="ADDITIONAL SPECIFICATIONS..." className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-bold outline-none bg-white text-slate-800 uppercase text-[12px] focus:border-indigo-500 transition-all shadow-sm resize-y" />
+                  </div>
+
+                  <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Primary Vendor</label>
-                    <select name="vendorId" className="w-full px-6 py-4 rounded-2xl border border-slate-200 font-black bg-white outline-none cursor-pointer uppercase text-[12px] focus:border-indigo-500" defaultValue={editingProduct?.vendorId}>
+                    <select name="vendorId" className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black bg-white outline-none cursor-pointer uppercase text-[12px] focus:border-indigo-500" defaultValue={editingProduct?.vendorId}>
                       <option value="">INTERNAL POOL / LOCAL SOURCE</option>
                       {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                     </select>
                   </div>
                 </div>
 
-                <div className="pt-8 border-t border-slate-100 flex gap-4">
-                  <button type="button" onClick={closeModal} className="flex-1 bg-slate-100 text-slate-900 font-black py-5 rounded-3xl transition-all uppercase tracking-widest text-xs">Discard</button>
-                  <button type="submit" disabled={saveStatus !== 'IDLE'} className={`flex-[2] font-black py-5 rounded-3xl shadow-2xl transition-all uppercase tracking-widest text-xs text-white ${saveStatus === 'SUCCESS' ? 'bg-emerald-600' : 'bg-slate-950 hover:bg-black'}`}>
+                <div className="pt-4 border-t border-slate-100 flex gap-4">
+                  <button type="button" onClick={closeModal} className="flex-1 bg-slate-100 text-slate-900 font-black py-4 rounded-[1.25rem] transition-all uppercase tracking-widest text-xs">Discard</button>
+                  <button type="submit" disabled={saveStatus !== 'IDLE'} className={`flex-[2] font-black py-4 rounded-[1.25rem] shadow-2xl transition-all uppercase tracking-widest text-xs text-white ${saveStatus === 'SUCCESS' ? 'bg-emerald-600' : 'bg-slate-950 hover:bg-black'}`}>
                     {saveStatus === 'SAVING' ? 'Synchronizing Ledger...' : saveStatus === 'SUCCESS' ? '✓ Master Record Committed' : editingProduct ? 'Synchronize Updates' : 'Commit New Asset'}
                   </button>
                 </div>
