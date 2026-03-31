@@ -1269,7 +1269,7 @@ const App: React.FC = () => {
           {currentView === 'CHEQUE_PRINT' && <ChequePrint vendors={vendors} />}
           {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={handleUpsertPO} onReceivePO={handleReceivePO} onDeletePO={handleDeletePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResyncBalances={handleResyncBalances} />}
           {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
-          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} />}
+          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} userProfile={userProfile} />}
 
         </div >
       </main >

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, BankAccount, Customer, Vendor, Product, Category, PurchaseOrder } from '../types';
+import { Transaction, BankAccount, Customer, Vendor, Product, Category, PurchaseOrder, UserProfile } from '../types';
 import * as XLSX from 'xlsx';
 
 interface AccountingProps {
@@ -10,12 +10,14 @@ interface AccountingProps {
     products: Product[];
     categories: Category[];
     purchaseOrders: PurchaseOrder[];
+    userProfile: UserProfile;
 }
 
-const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders }) => {
+const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders, userProfile }) => {
     const [activeReport, setActiveReport] = useState<'BALANCE_SHEET' | 'INCOME_STATEMENT' | 'CATEGORY_REPORT' | 'CRITICAL_STOCK' | 'DAILY_SUMMARY'>('BALANCE_SHEET');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [selectedCashier, setSelectedCashier] = useState('ALL CASHIERS');
 
     const getTodayLocal = () => {
         const d = new Date();
@@ -36,9 +38,11 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
             const txDate = t.date.split('T')[0];
-            return (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
+            const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
+            const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
+            return dateMatch && cashierMatch;
         });
-    }, [transactions, startDate, endDate]);
+    }, [transactions, startDate, endDate, selectedCashier]);
 
     // Helper to identify a reload item robustly
     const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
@@ -260,10 +264,11 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             // Define standard date checks for Sales/Expenses
             const isWithinRange = (date: string) => (!startDate || date >= startDate) && (!endDate || date <= endDate);
+            const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
 
             // 1. REVENUE/PROFIT/RELOADS (Always on sale date)
             if (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') {
-                if (!isWithinRange(txDateKey)) return;
+                if (!isWithinRange(txDateKey) || !cashierMatch) return;
                 if (!dayMap[txDateKey]) dayMap[txDateKey] = { revenue: 0, reloadRevenue: 0, reloadProfit: 0, purchases: 0, expense: 0, profit: 0 };
 
                 if (t.items && t.items.length > 0) {
@@ -299,7 +304,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             // 2. EXPENSE (On t.date)
             else if (t.type === 'EXPENSE') {
-                if (!isWithinRange(txDateKey)) return;
+                if (!isWithinRange(txDateKey) || !cashierMatch) return;
                 if (!dayMap[txDateKey]) dayMap[txDateKey] = { revenue: 0, reloadRevenue: 0, reloadProfit: 0, purchases: 0, expense: 0, profit: 0 };
                 dayMap[txDateKey].expense += Number(t.amount || 0);
             }
@@ -327,7 +332,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                     isPurchaseRelevant = true;
                 }
 
-                if (isPurchaseRelevant && effectivePurchaseDate && isWithinRange(effectivePurchaseDate)) {
+                if (isPurchaseRelevant && effectivePurchaseDate && isWithinRange(effectivePurchaseDate) && cashierMatch) {
                     if (!isReloadPurchase(t)) {
                         if (!dayMap[effectivePurchaseDate]) dayMap[effectivePurchaseDate] = { revenue: 0, reloadRevenue: 0, reloadProfit: 0, purchases: 0, expense: 0, profit: 0 };
                         dayMap[effectivePurchaseDate].purchases += Number(t.amount || 0);
@@ -353,7 +358,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 cumulative: Math.round(cumulative)
             };
         });
-    }, [filteredTransactions, products, categories]);
+    }, [transactions, startDate, endDate, selectedCashier, products, categories]);
 
     // Critical Stock Shortfall Report
     const criticalStockItems = useMemo(() => {
@@ -527,6 +532,19 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                                     onChange={(e) => setEndDate(e.target.value)}
                                     className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-mono text-xs md:text-sm"
                                 />
+                            </div>
+                            <div>
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Select Cashier</label>
+                                <select
+                                    value={selectedCashier}
+                                    onChange={(e) => setSelectedCashier(e.target.value)}
+                                    className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-bold text-xs md:text-sm bg-white min-w-[140px]"
+                                >
+                                    <option value="ALL CASHIERS">ALL CASHIERS</option>
+                                    {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3']).map(branch => (
+                                        <option key={branch} value={branch}>{branch}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                     )}
