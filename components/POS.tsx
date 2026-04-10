@@ -591,7 +591,7 @@ const POS: React.FC<POSProps> = ({
             </div>` : ''}
             <div class="hr"></div>
             <div style="font-size: 8px; text-align: right; font-weight: 800;">PAID BY: ${tx.paymentMethod}</div>
-            <div style="font-size: 7px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+            <div style="font-size: 11px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
                 * The advance payment for artworks is non-refundable.<br/>
                 * Payments made for printouts or photocopies are non-refundable.<br/>
                 * Exchanges are accepted on the same day only. No refunds will be provided.
