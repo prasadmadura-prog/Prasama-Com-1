@@ -284,11 +284,9 @@ const Purchases: React.FC<PurchasesProps> = ({
     if (!vendor) return null;
 
     // Filter POs: Non-draft entries contribute to the ledger
-    // FIX: Only include CREDIT POs in the credit ledger
     const pos = purchaseOrders.filter(p => p.vendorId === vendorLedgerId && p.status !== 'DRAFT' && p.paymentMethod === 'CREDIT');
 
     // Filter Txs: Settlements OR manual Purchases (exclude system-generated receipts)
-    // FIX: Only include CREDIT manual purchases
     const txs = transactions.filter(t =>
       t.vendorId === vendorLedgerId &&
       (t.type === 'CREDIT_PAYMENT' || (t.type === 'PURCHASE' && !t.id.startsWith('PU-') && t.paymentMethod === 'CREDIT'))
@@ -303,8 +301,9 @@ const Purchases: React.FC<PurchasesProps> = ({
     let cumulative = 0;
     const stream = chronological.map(item => {
       const isAddition = item.ledgerType === 'PO' || (item.ledgerType === 'TX' && item.type === 'PURCHASE');
-      const amount = isAddition ? Number((item as any).totalAmount || (item as any).amount) : -Number((item as any).amount);
-      cumulative += amount;
+      const itemAmount = Number((item as any).totalAmount || (item as any).amount || 0);
+      const delta = isAddition ? itemAmount : -itemAmount;
+      cumulative += delta;
       return { ...item, runningBalance: cumulative };
     });
 
@@ -1103,41 +1102,51 @@ const Purchases: React.FC<PurchasesProps> = ({
                       </button>
                     </div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-3">Strategic Supplier Audit Ledger</p>
+                    <div className="mt-2 flex gap-4">
+                      {vendorLedgerData.vendor.phone && <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">📞 {vendorLedgerData.vendor.phone}</p>}
+                      {vendorLedgerData.vendor.address && <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">📍 {vendorLedgerData.vendor.address}</p>}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Exposure Balance</p>
-                    <p className="text-3xl font-black font-mono text-rose-600">Rs. {Number(vendorLedgerData.vendor.totalBalance).toLocaleString()}</p>
-                    {Math.abs(Number(vendorLedgerData.vendor.totalBalance) - vendorLedgerData.auditBalance) > 0.1 && (
-                      <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mt-1 animate-pulse">⚠️ Balance Sync Required</p>
+                    <div className="flex gap-4">
+                      <div className="text-right">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Exposure Balance</p>
+                        <p className="text-3xl font-black font-mono text-indigo-600">Rs. {Number(vendorLedgerData.vendor.totalBalance).toLocaleString()}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Audit Balance</p>
+                        <p className="text-3xl font-black font-mono text-rose-600">Rs. {vendorLedgerData.auditBalance.toLocaleString()}</p>
+                      </div>
+                    </div>
+                    {Math.abs(Number(vendorLedgerData.vendor.totalBalance) - vendorLedgerData.auditBalance) > 1 && (
+                      <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mt-1 animate-pulse">⚠️ Physical Sync Required (Mismatch detected)</p>
                     )}
-                  </div>
                   <button onClick={() => setVendorLedgerId(null)} className="text-slate-300 hover:text-slate-900 text-6xl leading-none transition-colors">&times;</button>
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-10 custom-scrollbar">
-                <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
+                <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-x-auto shadow-sm">
                   <table className="w-full text-left text-sm border-collapse">
                     <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
                       <tr>
-                        <th className="px-8 py-5">Date</th>
-                        <th className="px-8 py-5">Reference</th>
-                        <th className="px-8 py-5">Operational Details</th>
-                        <th className="px-8 py-5 text-right">Inflow (Payable)</th>
-                        <th className="px-8 py-5 text-right">Outflow (Settled)</th>
-                        <th className="px-8 py-5 text-right">Running Balance</th>
-                        <th className="px-4 py-5 text-center">Action</th>
+                        <th className="px-6 py-5">Date</th>
+                        <th className="px-6 py-5">Reference</th>
+                        <th className="px-6 py-5">Operational Details</th>
+                        <th className="px-6 py-5 text-right">Inflow (Payable)</th>
+                        <th className="px-6 py-5 text-right">Outflow (Settled)</th>
+                        <th className="px-6 py-5 text-right">Running Balance</th>
+                        <th className="px-6 py-5 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium">
                       {vendorLedgerData.stream.map((item: any, idx) => (
                         <tr key={idx} className="hover:bg-indigo-50/20 transition-all group">
-                          <td className="px-8 py-5">
+                          <td className="px-6 py-5">
                             <p className="text-slate-900 font-black text-xs uppercase">{item.date.split('T')[0]}</p>
                           </td>
-                          <td className="px-8 py-5">
+                          <td className="px-6 py-5">
                             <button
                               onClick={() => {
                                 if (item.ledgerType === 'PO') printPurchaseOrder(item);
@@ -1153,7 +1162,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                               {item.id}
                             </button>
                           </td>
-                          <td className="px-8 py-5">
+                          <td className="px-6 py-5">
                             <p className="text-slate-500 text-[11px] font-bold uppercase italic max-w-xs truncate">
                               {item.ledgerType === 'PO' ? `Purchase Commitment` : item.description}
                             </p>
@@ -1164,20 +1173,20 @@ const Purchases: React.FC<PurchasesProps> = ({
                               <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-slate-50 border border-slate-100 rounded text-slate-400">{item.paymentMethod}</span>
                             </div>
                           </td>
-                          <td className="px-8 py-5 text-right">
+                          <td className="px-6 py-5 text-right">
                             {item.ledgerType === 'PO' || (item.ledgerType === 'TX' && item.type === 'PURCHASE') ? (
                               <p className="text-sm font-black font-mono text-rose-600">+{Number(item.totalAmount || item.amount).toLocaleString()}</p>
                             ) : '—'}
                           </td>
-                          <td className="px-8 py-5 text-right">
+                          <td className="px-6 py-5 text-right">
                             {item.ledgerType === 'TX' && item.type === 'CREDIT_PAYMENT' ? (
                               <p className="text-sm font-black font-mono text-emerald-600">-{Number(item.amount).toLocaleString()}</p>
                             ) : '—'}
                           </td>
-                          <td className="px-8 py-5 text-right text-slate-400 font-mono font-bold text-xs">
+                          <td className="px-6 py-5 text-right text-slate-400 font-mono font-bold text-xs">
                             Rs. {Number(item.runningBalance).toLocaleString()}
                           </td>
-                          <td className="px-4 py-5 text-center min-w-[180px]">
+                          <td className="px-6 py-5 text-center min-w-[200px]">
                             <div className="flex justify-center gap-3">
                               <button
                                 onClick={() => {

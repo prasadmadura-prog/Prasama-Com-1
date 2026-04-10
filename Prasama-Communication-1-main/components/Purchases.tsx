@@ -521,17 +521,47 @@ const Purchases: React.FC<PurchasesProps> = ({
       )}
 
       {isVendorModalOpen && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-           <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300">
-             <div className="p-10 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Supplier Registration</h3>
-               <button onClick={closeVendorModal} className="text-slate-300 hover:text-slate-900 text-4xl leading-none">&times;</button>
-             </div>
-             <form onSubmit={handleSaveVendor} className="p-10 space-y-6">
-                <input required value={vName} onChange={e => setVName(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm" placeholder="SUPPLIER LEGAL NAME" />
-                <button type="submit" className="w-full bg-indigo-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[10px] shadow-lg">Save Profile</button>
-             </form>
-           </div>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in duration-300 my-8">
+            <div className="p-10 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Supplier Registration</h3>
+              <button onClick={closeVendorModal} className="text-slate-300 hover:text-slate-900 text-4xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={handleSaveVendor} className="p-10 space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Supplier / Company Name</label>
+                  <input required value={vName} onChange={e => setVName(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="E.G. KAPILA DISTRIBUTORS" />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Contact Person</label>
+                    <input value={vContact} onChange={e => setVContact(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="NAME" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone Number</label>
+                    <input value={vPhone} onChange={e => setVPhone(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="07X XXXXXXX" />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                  <input type="email" value={vEmail} onChange={e => setVEmail(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="supplier@email.com" />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Physical Address / Warehouse</label>
+                  <textarea value={vAddress} onChange={e => setVAddress(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm resize-none h-24" placeholder="FULL BUSINESS ADDRESS" />
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button type="button" onClick={closeVendorModal} className="flex-1 bg-slate-100 text-slate-900 font-black py-4 rounded-xl uppercase tracking-widest text-[10px]">Cancel</button>
+                <button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-100">Save Supplier Profile</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
