@@ -73,9 +73,9 @@ const Purchases: React.FC<PurchasesProps> = ({
   const [selectedInvoices, setSelectedInvoices] = useState<string[]>([]);
 
   const [vName, setVName] = useState('');
+  const [vPhone, setVPhone] = useState('');
   const [vContact, setVContact] = useState('');
   const [vEmail, setVEmail] = useState('');
-  const [vPhone, setVPhone] = useState('');
   const [vAddress, setVAddress] = useState('');
 
   const [inModalSettleAmount, setInModalSettleAmount] = useState('');
@@ -176,7 +176,7 @@ const Purchases: React.FC<PurchasesProps> = ({
           if (!item.productName || !item.productSku) {
             const p = products.find(p => p.id === item.productId) ||
               products.find(p => p.sku === item.productId) ||
-              products.find(p => p.name.toUpperCase().trim() === item.productId.toString().toUpperCase().trim());
+              products.find(p => p.name?.toUpperCase().trim() === item.productId?.toString().toUpperCase().trim());
             if (p) {
               return {
                 ...item,
@@ -367,13 +367,16 @@ const Purchases: React.FC<PurchasesProps> = ({
         date: safeDate,
         vendorId,
         items: poItems.map(i => {
+          // Priority lookup: ID -> SKU -> Name matching
           const product = products.find(p => p.id === i.productId) ||
             products.find(p => p.sku === i.productId) ||
-            products.find(p => p.name.toUpperCase().trim() === (i.productName || i.productId).toString().toUpperCase().trim());
+            products.find(p => p.sku === i.productSku) ||
+            products.find(p => p.name?.toUpperCase().trim() === (i.productName || i.productId)?.toString().toUpperCase().trim());
+
           return {
             productId: i.productId,
-            productName: product?.name || i.productName,
-            productSku: product?.sku || i.productSku,
+            productName: product?.name || i.productName || 'Unknown Item',
+            productSku: product?.sku || i.productSku || 'N/A',
             quantity: Number(i.quantity) || 0,
             freeQuantity: Number(i.freeQuantity) || 0,
             cost: Number(i.cost) || 0
@@ -557,13 +560,14 @@ const Purchases: React.FC<PurchasesProps> = ({
       let displayName = it.productName;
       let displaySku = it.productSku;
 
-      // Priority 2: If not stored, try to find product in products array
-      if (!displayName) {
+      // Priority 2: If not stored or stored as ID, try to find product in products array
+      if (!displayName || displayName === it.productId) {
         let prod = products.find(p => p.id === it.productId);
 
-        // If not found by ID, try by name
+        // If not found by ID, try by SKU or Name
         if (!prod) {
-          prod = products.find(p => p.name === it.productId);
+          prod = products.find(p => p.sku === it.productId) || 
+                 products.find(p => p.name === it.productId);
         }
 
         if (prod) {
@@ -1326,9 +1330,20 @@ const Purchases: React.FC<PurchasesProps> = ({
                       />
                     </div>
                     <div className="space-y-2">
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between items-center shrink-0">
                         <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Supplier</label>
-                        <button onClick={() => openVendorModal()} className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline">+ New Supplier</button>
+                        <div className="flex gap-3">
+                          {vendorId && (
+                            <button
+                              type="button"
+                              onClick={() => openVendorModal(vendors.find(v => v.id === vendorId))}
+                              className="text-[9px] font-black text-slate-500 hover:text-indigo-600 uppercase tracking-widest transition-colors flex items-center gap-1"
+                            >
+                              <span>✎</span> EDIT INFO
+                            </button>
+                          )}
+                          <button type="button" onClick={() => openVendorModal()} className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline">+ NEW SUPPLIER</button>
+                        </div>
                       </div>
                       <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase">
                         <option value="" disabled>Select Vendor</option>
@@ -1446,7 +1461,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                           {poItems.map((item, idx) => {
                             const product = products.find(p => p.id === item.productId) ||
                               products.find(p => p.sku === item.productId) ||
-                              products.find(p => p.name.toUpperCase().trim() === item.productId.toString().toUpperCase().trim());
+                              products.find(p => p.name?.toUpperCase().trim() === item.productId?.toString().toUpperCase().trim());
                             const totalCost = item.quantity * item.cost;
                             const totalRetail = (Number(item.quantity) + (Number(item.freeQuantity) || 0)) * Number(product?.price || 0);
                             const profit = totalRetail - totalCost;
@@ -1754,15 +1769,45 @@ const Purchases: React.FC<PurchasesProps> = ({
 
       {
         isVendorModalOpen && (
-          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-            <div className="bg-white rounded-[3rem] shadow-2xl w-full max-md overflow-hidden animate-in zoom-in duration-300">
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+            <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in duration-300 my-8">
               <div className="p-10 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Supplier Registration</h3>
                 <button onClick={closeVendorModal} className="text-slate-300 hover:text-slate-900 text-4xl leading-none">&times;</button>
               </div>
               <form onSubmit={handleSaveVendor} className="p-10 space-y-6">
-                <input required value={vName} onChange={e => setVName(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm" placeholder="SUPPLIER LEGAL NAME" />
-                <button type="submit" className="w-full bg-indigo-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[10px] shadow-lg">Save Profile</button>
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Supplier / Company Name</label>
+                    <input required value={vName} onChange={e => setVName(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="E.G. KAPILA DISTRIBUTORS" />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Contact Person</label>
+                      <input value={vContact} onChange={e => setVContact(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="NAME" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone Number</label>
+                      <input value={vPhone} onChange={e => setVPhone(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="07X XXXXXXX" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                    <input type="email" value={vEmail} onChange={e => setVEmail(e.target.value)} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold text-sm outline-none focus:border-indigo-500 shadow-sm" placeholder="supplier@email.com" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Physical Address / Warehouse</label>
+                    <textarea value={vAddress} onChange={e => setVAddress(e.target.value.toUpperCase())} className="w-full px-5 py-4 rounded-2xl border border-slate-200 font-bold uppercase text-sm outline-none focus:border-indigo-500 shadow-sm resize-none h-24" placeholder="FULL BUSINESS ADDRESS" />
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button type="button" onClick={closeVendorModal} className="flex-1 bg-slate-100 text-slate-900 font-black py-4 rounded-xl uppercase tracking-widest text-[10px]">Cancel</button>
+                  <button type="submit" className="flex-[2] bg-indigo-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">Save Supplier Profile</button>
+                </div>
               </form>
             </div>
           </div>

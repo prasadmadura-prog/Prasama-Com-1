@@ -15,7 +15,7 @@ export const formatDate = (date: string | Date | undefined | null): string => {
     }).formatToParts(d);
 
     const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
-    return `${get('day')}.${get('month')}.${get('year')}`;
+    return `${get('day')}/${get('month')}/${get('year')}`;
 };
 
 export const formatDateTime = (date: string | Date | undefined | null): string => {

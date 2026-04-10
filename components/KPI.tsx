@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
 import { Transaction, Product, BankAccount, View, PurchaseOrder, DaySession, Customer, Vendor, Category, UserProfile } from '../types';
-import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, Legend } from 'recharts';
+import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, Legend, PieChart, Pie } from 'recharts';
 
 interface KPIProps {
     transactions: Transaction[];
@@ -34,8 +34,14 @@ const KPI: React.FC<KPIProps> = ({
     };
     const today = getTodayLocal();
 
+    const getMonthFirst = () => {
+        const d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+    };
+    const monthFirst = getMonthFirst();
+
     const [branchFilter, setBranchFilter] = React.useState<'ALL' | string>('ALL');
-    const [startDate, setStartDate] = React.useState(today);
+    const [startDate, setStartDate] = React.useState(monthFirst);
     const [endDate, setEndDate] = React.useState(today);
 
     // Removed auto-sync to userProfile.branch to default to 'ALL'
@@ -189,6 +195,91 @@ const KPI: React.FC<KPIProps> = ({
             .sort((a, b) => b.value - a.value)
             .slice(0, 5);
     }, [transactions, products, categories, branchFilter, startDate, endDate]);
+
+    const profitContributionByCategory = useMemo(() => {
+        const catProfitMap: Record<string, number> = {};
+
+        transactions.filter(t => t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT').forEach(t => {
+            const tBranch = normalizeBranch(t.branchId);
+            const target = normalizeBranch(branchFilter);
+            if (branchFilter !== 'ALL' && tBranch !== target) return;
+
+            const txDate = t.date.split('T')[0];
+            if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
+
+            if (t.items) {
+                t.items.forEach(item => {
+                    const product = products.find(p => p.id === item.productId);
+                    const catId = product?.categoryId || 'Uncategorized';
+                    const catName = categories.find(c => c.id === catId)?.name || 'Uncategorized';
+                    const category = categories.find(c => c.id === catId);
+
+                    const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+
+                    let profit = 0;
+                    if (isReloadItem(item, product, category, t.description)) {
+                        profit = lineTotal * getReloadRate(t.description, product?.name);
+                    } else {
+                        const cost = Number(product?.cost || 0) * Number(item.quantity);
+                        profit = lineTotal - cost;
+                    }
+
+                    catProfitMap[catName] = (catProfitMap[catName] || 0) + profit;
+                });
+            }
+        });
+
+        const totalProfitInCategory = Object.values(catProfitMap).reduce((acc, v) => acc + v, 0);
+
+        return Object.entries(catProfitMap)
+            .map(([name, value]) => ({
+                name,
+                value: Math.max(0, value), // Ensure no negative values for pie chart
+                percentage: totalProfitInCategory > 0 ? (value / totalProfitInCategory) * 100 : 0
+            }))
+            .sort((a, b) => b.value - a.value);
+    }, [transactions, products, categories, branchFilter, startDate, endDate]);
+
+    const topProductsByProfit = useMemo(() => {
+        const productProfitMap: Record<string, { name: string; profit: number }> = {};
+
+        transactions.filter(t => t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT').forEach(t => {
+            const tBranch = normalizeBranch(t.branchId);
+            const target = normalizeBranch(branchFilter);
+            if (branchFilter !== 'ALL' && tBranch !== target) return;
+
+            const txDate = t.date.split('T')[0];
+            if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
+
+            if (t.items) {
+                t.items.forEach(item => {
+                    const product = products.find(p => p.id === item.productId);
+                    if (!product) return;
+
+                    const category = categories.find(c => c.id === product.categoryId);
+                    const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+
+                    let profit = 0;
+                    if (isReloadItem(item, product, category, t.description)) {
+                        profit = lineTotal * getReloadRate(t.description, product.name);
+                    } else {
+                        const cost = Number(product.cost || 0) * Number(item.quantity);
+                        profit = lineTotal - cost;
+                    }
+
+                    if (!productProfitMap[product.id]) {
+                        productProfitMap[product.id] = { name: product.name, profit: 0 };
+                    }
+                    productProfitMap[product.id].profit += profit;
+                });
+            }
+        });
+
+        return Object.values(productProfitMap)
+            .sort((a, b) => b.profit - a.profit)
+            .slice(0, 10);
+    }, [transactions, products, categories, branchFilter, startDate, endDate]);
+
 
     const hourlyRevenue = useMemo(() => {
         const hours = Array.from({ length: 24 }, (_, i) => ({
@@ -740,6 +831,90 @@ const KPI: React.FC<KPIProps> = ({
                     <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest bg-rose-50 px-4 py-2 rounded-xl">Outstanding Payments</p>
                 </div>
             </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Profit Contribution Chart */}
+                <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Profit Contribution</h3>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Share of Total Profit by Category</p>
+                    </div>
+                    {profitContributionByCategory.length > 0 ? (
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                            <div className="h-[250px] w-full md:w-1/2">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={profitContributionByCategory}
+                                            dataKey="value"
+                                            nameKey="name"
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={80}
+                                            paddingAngle={5}
+                                        >
+                                            {profitContributionByCategory.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6'][index % 10]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '11px', fontWeight: 'bold' }}
+                                            formatter={(value: number) => `Rs. ${Math.round(value).toLocaleString()}`}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="w-full md:w-1/2 space-y-3">
+                                {profitContributionByCategory.slice(0, 5).map((cat, idx) => (
+                                    <div key={cat.name} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b'][idx % 5] }}></div>
+                                            <span className="text-[10px] font-black text-slate-600 uppercase tracking-tight truncate max-w-[100px]">{cat.name}</span>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-black text-slate-900 font-mono">Rs. {Math.round(cat.value).toLocaleString()}</p>
+                                            <p className="text-[8px] font-bold text-slate-400">{cat.percentage.toFixed(1)}%</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="h-[250px] flex flex-col items-center justify-center text-slate-300">
+                            <span className="text-4xl mb-2">🥧</span>
+                            <p className="text-[10px] font-black uppercase tracking-widest">No profit data available for this range</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Top 10 Products by Profit */}
+                <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Top 10 Products by Profit</h3>
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Highest profit yielding items</p>
+                    </div>
+                    <div className="space-y-4 max-h-[250px] overflow-y-auto pr-2">
+                        {topProductsByProfit.length > 0 ? topProductsByProfit.map((prod, idx) => (
+                            <div key={idx} className="flex justify-between items-center group">
+                                <div className="flex items-center gap-4">
+                                    <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-[10px] font-black text-slate-400 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-all">{idx + 1}</span>
+                                    <span className="text-xs font-bold text-slate-700 group-hover:text-indigo-600 transition-all truncate max-w-[180px]">{prod.name}</span>
+                                </div>
+                                <div className="bg-emerald-50 px-3 py-1 rounded-lg">
+                                    <span className="text-[10px] font-black text-emerald-600 font-mono">Rs. {Math.round(prod.profit).toLocaleString()}</span>
+                                </div>
+                            </div>
+                        )) : (
+                            <div className="h-full flex flex-col items-center justify-center text-slate-300 py-10">
+                                <span className="text-4xl mb-2">📊</span>
+                                <p className="text-[10px] font-black uppercase tracking-widest">No data available</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
 
         </div>
     );

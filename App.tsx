@@ -834,7 +834,7 @@ const App: React.FC = () => {
     const stockBranch = getStockBranch(activeBranch);
 
     for (const item of po.items) {
-      const product = products.find(p => p.id === item.productId) || products.find(p => p.name === item.productId);
+      const product = products.find(p => p.id === item.productId) || products.find(p => p.sku === item.productId) || products.find(p => p.name === item.productId);
       if (product) {
         const bStocks = { ...(product.branchStocks || {}) };
         const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;

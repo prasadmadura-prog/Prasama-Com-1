@@ -261,20 +261,23 @@ const Dashboard: React.FC<DashboardProps> = ({
     transactions.filter(t => t && (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') && (branchFilter === 'ALL' || t.branchId === branchFilter)).forEach(tx => {
       tx.items?.forEach(item => {
         const product = products.find(p => p.id === item.productId);
+        if (!product) return;
+
+        const productCategory = categories.find(c => c.id === product.categoryId);
+        const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
+          (product.categoryId && product.categoryId.toUpperCase().includes('RELOAD')) ||
+          (product.name || '').toUpperCase().includes('RELOAD');
+
+        // Skip reload items for the leaderboards (Top Categories, Top Products) as requested
+        if (isReload) return;
+
         const revenue = Number(item.quantity) * Number(item.price);
         const units = Number(item.quantity);
         const lineDiscount = Number(item.discount || 0);
 
-        if (product) {
-          const productCategory = categories.find(c => c.id === product.categoryId);
-          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-            (product.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-
-          let unitCost = Number(product.cost || 0);
-          if (isReload) unitCost = Number(item.price) * 0.96;
-
-          const cost = units * unitCost;
-          const profit = revenue - cost - lineDiscount;
+        let unitCost = Number(product.cost || 0);
+        const cost = units * unitCost;
+        const profit = revenue - cost - lineDiscount;
 
           if (!productMap[product.id]) {
             productMap[product.id] = { name: product.name, revenue: 0, units: 0, profit: 0 };
@@ -294,9 +297,8 @@ const Dashboard: React.FC<DashboardProps> = ({
           }
           categoryMap[catId].revenue += revenue;
           categoryMap[catId].units += units;
-        }
+        });
       });
-    });
 
     const topProfitProducts = Object.values(productMap)
       .sort((a, b) => b.profit - a.profit)
