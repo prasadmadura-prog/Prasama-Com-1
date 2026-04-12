@@ -32,6 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'QUOTATIONS', label: 'Quotation', icon: '📝' },
     { id: 'SALES_HISTORY', label: 'Sales History', icon: '📜' },
     { id: 'INVENTORY', label: 'Inventory', icon: '📦' },
+    { id: 'FIXED_ASSETS', label: 'Fixed Assets', icon: '🏛️' },
     { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '🏷️' },
     { id: 'PURCHASES', label: 'Purchases', icon: '📥' },
     { id: 'CUSTOMERS', label: 'Customers', icon: '👥' },

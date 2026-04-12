@@ -26,7 +26,8 @@ export const collections = {
   quotations: 'p_v16_quotations',
   profile: 'p_v16_profile',
   users: 'p_v16_users',
-  chequeHistory: 'p_v16_chequeHistory'
+  chequeHistory: 'p_v16_chequeHistory',
+  fixedAssets: 'p_v16_fixedAssets'
 };
 
 const safeNum = (val: any, fallback = 0): number => {

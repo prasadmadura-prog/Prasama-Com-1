@@ -164,7 +164,21 @@ export interface UserProfile {
   email?: string;
 }
 
-export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD' | 'USER_CONTROL';
+export interface FixedAsset {
+  id: string;
+  name: string;
+  category: string;
+  purchaseDate: string;
+  purchasePrice: number;
+  currentValue: number;
+  depreciationRate?: number; // Annual %
+  location?: string;
+  serialNumber?: string;
+  notes?: string;
+  userId?: string;
+}
+
+export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD' | 'USER_CONTROL' | 'FIXED_ASSETS';
 
 export interface POSSession {
   cart: {

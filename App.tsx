@@ -25,6 +25,7 @@ import Accounting from './components/Accounting';
 import KPI from './components/KPI';
 import Reload from './components/Reload';
 import UserControl from './components/UserControl';
+import FixedAssets from './components/FixedAssets';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -43,6 +44,7 @@ const App: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [fixedAssets, setFixedAssets] = useState<FixedAsset[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
 
   const [userProfile, setUserProfile] = useState<UserProfile>({
@@ -173,6 +175,7 @@ const App: React.FC = () => {
       subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])),
       subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[])),
       subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])),
+      subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])),
       subscribeToDocument(dbCols.profile, 'main', (data: any) => {
         setUserProfile(prev => ({
           ...prev,
@@ -1102,6 +1105,7 @@ const App: React.FC = () => {
         if (data.quotations) await bulkUpsert(dbCols.quotations, data.quotations);
         if (data.recurringExpenses) await bulkUpsert(dbCols.recurringExpenses, data.recurringExpenses);
         if (data.daySessions) await bulkUpsert(dbCols.daySessions, data.daySessions);
+        if (data.fixedAssets) await bulkUpsert(dbCols.fixedAssets, data.fixedAssets);
         if (data.userProfile) {
           await upsertDocument(dbCols.profile, 'main', data.userProfile);
         }
@@ -1294,6 +1298,7 @@ const App: React.FC = () => {
           {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
           {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} userProfile={userProfile} />}
           {currentView === 'USER_CONTROL' && <UserControl userProfile={userProfile} />}
+          {currentView === 'FIXED_ASSETS' && <FixedAssets assets={fixedAssets} userProfile={userProfile} onUpsertAsset={(a) => upsertDocument(dbCols.fixedAssets, a.id, a)} onDeleteAsset={(id) => deleteDocument(dbCols.fixedAssets, id)} />}
 
         </div >
       </main >
