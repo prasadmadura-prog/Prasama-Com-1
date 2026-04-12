@@ -9,9 +9,10 @@ interface LoginProps {
   onLogin: (profile: UserProfile) => void;
   onSignUp: (profile: UserProfile) => void;
   userProfile: UserProfile;
+  users: UserProfile[];
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, users = [] }) => {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,17 +25,35 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     // Simple Local Logic (Keep this for now as fallback/legacy)
     const normalizedUser = credentials.username.toLowerCase();
 
-    let profileName = "AUTHORIZED USER";
-    let branchName = "CASHIER 1"; // Default for salesprasama or admin
-    let isAdmin = true;
+    let profileName = normalizedUser.toUpperCase();
+    let branchName = "CASHIER 1";
+    let isAdmin = false;
 
-    if (normalizedUser === 'madupathirana95@gmail.com') {
+    if (normalizedUser === 'salesprasama@gmail.com' || normalizedUser === 'cashier 1') {
+      isAdmin = true;
+      profileName = normalizedUser === 'cashier 1' ? "MASTER ADMIN" : "AUTHORIZED USER";
+    }
+
+    // Check DB Users
+    const dbUser = users.find(u => (u.loginUsername || '').toLowerCase() === normalizedUser);
+    if (dbUser) {
+      if (dbUser.loginPassword !== credentials.password) {
+        setError("Sign-in failed. Invalid password for this account.");
+        return;
+      }
+      profileName = dbUser.name;
+      branchName = dbUser.branch;
+      isAdmin = dbUser.isAdmin || false;
+    } else if (normalizedUser === 'madupathirana95@gmail.com') {
       if (credentials.password !== 'Madura12') {
         setError("Invalid Password for this user.");
         return;
       }
       profileName = "MADURA PATHIRANA";
       branchName = "CASHIER 2";
+    } else if (!isAdmin) {
+      setError("Account not found. Please contact the administrator.");
+      return;
     }
 
     onLogin({
@@ -43,7 +62,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       companyName: "PRASAMA(PVT)LTD", // Explicitly set company name
       companyAddress: "No 16, Kirulapana Supermarket, Colombo 05",
       branch: branchName,
-      allBranches: (branchName === "CASHIER 2") ? ["CASHIER 2"] : ["CASHIER 1", "CASHIER 2"],
+      allBranches: (branchName === "CASHIER 2") ? ["CASHIER 1", "CASHIER 2"] : (isAdmin ? ["CASHIER 1", "CASHIER 2", "CASHIER 3"] : ["CASHIER 1", "CASHIER 2"]),
       loginUsername: credentials.username,
       isAdmin: isAdmin
     });

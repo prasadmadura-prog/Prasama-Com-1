@@ -110,7 +110,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           .label {
             border: 0.1mm dashed #ccc;
             border-radius: 0;
-            width: ${labelDim.w};
+            width: 100%;
+            max-width: ${labelDim.w};
             height: ${labelDim.h};
             display: flex;
             flex-direction: column;

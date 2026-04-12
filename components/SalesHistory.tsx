@@ -560,14 +560,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       .reduce((acc, t) => {
         if (!t.items) {
           const desc = (t.description || '').toUpperCase();
-          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          const isReload = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
           return isReload ? acc + Number(t.amount || 0) : acc;
         }
         const reloadAmount = t.items.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
           const category = categories.find(c => c.id === product?.categoryId);
+          const cName = (category?.name || "").toUpperCase();
 
-          if (isReloadItem(item, product, category, t.description)) {
+          if (isHotReloadItem(item, product, category, t.description)) {
             return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
           }
           return itemAcc;
@@ -575,19 +576,19 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         return acc + reloadAmount;
       }, 0);
 
-    // Total revenue EXCLUDING reload category
+    // Total revenue EXCLUDING hot reload category
     const revenueExcludingReload = rangeEntries
       .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
       .reduce((acc, t) => {
         if (!t.items) {
           const desc = (t.description || '').toUpperCase();
-          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          const isReload = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
           return isReload ? acc : acc + Number(t.amount || 0);
         }
         const nonReloadAmount = t.items.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
           const category = categories.find(c => c.id === product?.categoryId);
-          if (!isReloadItem(item, product, category, t.description)) {
+          if (!isHotReloadItem(item, product, category, t.description)) {
             return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
           }
           return itemAcc;
@@ -613,7 +614,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           const category = categories.find(c => c.id === product?.categoryId);
           const itemNet = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-          if (isReloadItem(item, product, category, b.description)) {
+          if (isHotReloadItem(item, product, category, b.description)) {
             return acc + (itemNet * 0.04);
           }
           return acc + itemNet;
@@ -622,36 +623,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         return a + saleRealized;
       }, 0);
 
-    // Profit = (Revenue - Cost) + 4% of reload sales (Already covered by totalRevenue - cost + 0 if we consider reload cost as 0 here? No costOfRevenue calculation needs check)
-    // Actually: Profit = (NonReloadRev - NonReloadCost) + ReloadMargin
-    // costOfRevenue above calculates cost for ALL items including reloads?
-    // We need to exclude Reload Cost from costOfRevenue if we are treating Reload Rev as Margin.
-    // Or simpler: Profit is correct as implemented before if costOfRevenue correctly reflects costs?
-    // In POS: Reload Cost = 96% of Price. Item Cost in DB might be 0 or 96?
-    // In POS handleQuickReload: cost = amount * 0.96.
-    // So costOfRevenue WILL include 96% cost.
-    // Profit = (TotalGrossRevenue - TotalCost).
-    // TotalGrossRevenue = NonReload + ReloadGross.
-    // Profit = (NonReload - NonReloadCost) + (ReloadGross - ReloadCost).
-    // ReloadProfit = ReloadGross - (ReloadGross * 0.96) = ReloadGross * 0.04.
-    // THIS MATCHES `reloadProfit` calculated below.
-    // BUT `costOfRevenue` includes reload cost.
-    // And `totalRevenue` (variable `revenueExcludingReload`) excludes reload revenue.
-    // So `profit` formula below was: (revenueExcludingReload - costOfRevenue) + reloadProfit.
-    // If `costOfRevenue` INCLUDES reload cost, then:
-    // Profit = (NonReloadRev - (NonReloadCost + ReloadCost)) + ReloadProfit.
-    // Profit = NonReloadRev - NonReloadCost - ReloadCost + ReloadProfit.
-    // This is WRONG. It subtracts ReloadCost!
-    // We must ensure costOfRevenue EXCLUDES reload cost if we use this formula.
 
-    // REDEFINE costOfRevenue to EXCLUDE reloads
+    // REDEFINE costOfRevenue to EXCLUDE hot reloads
     const costOfRevenue = rangeEntries
       .filter(s => s.type === 'SALE')
       .reduce((acc, t) => {
         const itemsCost = t.items?.reduce((itemAcc, item) => {
           const product = products.find(p => p.id === item.productId);
           const category = categories.find(c => c.id === product?.categoryId);
-          if (!isReloadItem(item, product, category, t.description)) {
+          if (!isHotReloadItem(item, product, category, t.description)) {
             return itemAcc + (Number(product?.cost || 0) * Number(item.quantity));
           }
           return itemAcc;
@@ -681,6 +661,24 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     // Profit = (NonReload Revenue - NonReload Cost) + 4% of reload sales - totalExpenses
     const reloadProfit = reloadSales * 0.04;
     const profit = (revenueExcludingReload - costOfRevenue) + reloadProfit - totalExpenses;
+
+    const reloadSales = rangeEntries
+      .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
+      .reduce((acc, t) => {
+        if (!t.items) {
+          const desc = (t.description || '').toUpperCase();
+          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          return isReload ? acc + Number(t.amount || 0) : acc;
+        }
+        return acc + t.items.reduce((itemAcc, item) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          if (isReloadItem(item, product, category, t.description)) {
+            return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+          }
+          return itemAcc;
+        }, 0);
+      }, 0);
 
     // Net Revenue = Total Sales - Total Purchases
     const netRevenue = totalRevenue - totalPurchases;
@@ -731,7 +729,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           const category = categories.find(c => c.id === product?.categoryId);
           const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-          if (isReloadItem(item, product, category, s.description)) {
+          if (isHotReloadItem(item, product, category, s.description)) {
             txReloadRevenue += lineTotal;
             txReloadProfit += (lineTotal * 0.04);
           } else {
@@ -742,13 +740,13 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         });
       } else {
         const desc = (s.description || '').toUpperCase();
-        const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
-        if (isReload) {
+        const isHot = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+        if (isHot) {
           txReloadRevenue = Number(s.amount || 0);
           txReloadProfit = txReloadRevenue * 0.04;
         } else {
           txRetailRevenue = Number(s.amount || 0);
-          txRetailProfit = Number(s.amount || 0); // Assuming 100% margin for unknown items? Or 0? Stick to original behavior for retail.
+          txRetailProfit = Number(s.amount || 0); 
         }
       }
 
@@ -765,7 +763,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     return {
       costOfRevenue,
-      totalRevenue, // Now showing only gross sale value as requested
+      totalRevenue, 
       realizedInflow,
       profit,
       margin,
@@ -963,9 +961,14 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             onChange={(e) => setCashierFilter(e.target.value)}
             className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none uppercase cursor-pointer hover:border-indigo-500 transition-all text-indigo-900"
           >
-            <option value="ALL">All Terminals</option>
+            {userProfile.isAdmin && <option value="ALL">All Terminals</option>}
             {userProfile.allBranches && userProfile.allBranches.length > 0 ? (
-              userProfile.allBranches.map(b => <option key={b} value={b}>{b}</option>)
+              userProfile.allBranches
+                .filter(b => {
+                  if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
+                  return true;
+                })
+                .map(b => <option key={b} value={b}>{b}</option>)
             ) : (
               <>
                 <option value="CASHIER 1">Cashier 1</option>

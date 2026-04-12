@@ -24,6 +24,7 @@ import Login from './components/Login';
 import Accounting from './components/Accounting';
 import KPI from './components/KPI';
 import Reload from './components/Reload';
+import UserControl from './components/UserControl';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +43,7 @@ const App: React.FC = () => {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
 
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: "PRASAMA ERP",
@@ -98,6 +100,11 @@ const App: React.FC = () => {
     // ENFORCE CASHIER 2 FOR SPECIFIC USERS
     const emailLower = (newProfile.email || '').toLowerCase();
     const usernameLower = (newProfile.loginUsername || '').toLowerCase();
+    if (emailLower === 'salesprasama@gmail.com' || usernameLower === 'salesprasama@gmail.com') {
+      newProfile.isAdmin = true;
+      newProfile.branch = 'CASHIER 1';
+    }
+
     if (emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com') {
       newProfile.branch = 'CASHIER 2';
     } else {
@@ -114,8 +121,14 @@ const App: React.FC = () => {
         return (bUp === 'LOCAL NODE' || bUp === 'BOOKSHOP') ? 'CASHIER 1' : b;
       });
       // Ensure we have our core branches
+      if (newProfile.branch === 'CASHIER 2' || newProfile.isAdmin) {
+        if (!newProfile.allBranches.includes('CASHIER 1')) newProfile.allBranches.push('CASHIER 1');
+      }
       if (!newProfile.allBranches.includes('CASHIER 2')) newProfile.allBranches.push('CASHIER 2');
       if (!newProfile.allBranches.includes('CASHIER 3')) newProfile.allBranches.push('CASHIER 3');
+      if (newProfile.isAdmin && !newProfile.allBranches.includes('ALL')) {
+        newProfile.allBranches.unshift('ALL');
+      }
       newProfile.allBranches = [...new Set(newProfile.allBranches)]; // Filter unique
     }
     return newProfile;
@@ -138,6 +151,12 @@ const App: React.FC = () => {
       setCurrentView('LOGIN');
     }
     setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // Fetch users for Login check even if not logged in
+    const unsub = subscribeToCollection(dbCols.users, (data) => setUsers(data as UserProfile[]));
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -192,14 +211,13 @@ const App: React.FC = () => {
     // Use provided ID or generate
     const txId = partialTx.id || `TX-${Date.now()}`;
 
-    // Calculate generic cost basis (purely for record, not deduction yet)
     let costBasis = (partialTx.items || []).reduce((acc: number, item: any) => {
       const product = products.find(p => p.id === item.productId);
       const productCategory = categories.find(c => c.id === product?.categoryId);
-      const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-        (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+      const categoryName = (productCategory?.name || '').toUpperCase();
+      const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
       let itemCost = Number(product?.cost || 0);
-      if (isReload && itemCost === 0) itemCost = Number(item.price) * 0.96;
+      if (isHotReload && itemCost === 0) itemCost = Number(item.price) * 0.96;
       return acc + (itemCost * Number(item.quantity));
     }, 0);
 
@@ -252,16 +270,15 @@ const App: React.FC = () => {
             // FIX: For Hot Reloads, deduct the COST VALUE (wallet balance) instead of quantity
             let quantityToDeduct = Number(item.quantity);
             const productCategory = categories.find(c => c.id === product.categoryId);
-            const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-              (product.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+            const categoryName = (productCategory?.name || '').toUpperCase();
+            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
-            if (isReload) {
+            if (isHotReload) {
               // Deduct Cost (approx 96% of Price) from the Stock Balance
-              // Example: Sale 100 -> Cost 96. Stock 1000 -> 904.
               quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
             }
 
-            const updatedStock = isReload ? (Number(currentStock) - quantityToDeduct) : Math.max(0, Number(currentStock) - quantityToDeduct);
+            const updatedStock = isHotReload ? (Number(currentStock) - quantityToDeduct) : Math.max(0, Number(currentStock) - quantityToDeduct);
 
             bStocks[stockBranch] = updatedStock;
 
@@ -291,13 +308,12 @@ const App: React.FC = () => {
       let costBasis = (tx.items || []).reduce((acc, item) => {
         const product = products.find(p => p.id === item.productId);
         const productCategory = categories.find(c => c.id === product?.categoryId);
-        const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-          (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+        const categoryName = (productCategory?.name || '').toUpperCase();
+        const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
-        // If it's a reload, the cost is 96% of the selling price (unless specific cost is set)
         let itemCost = Number(product?.cost || 0);
-        if (isReload && itemCost === 0) {
-          itemCost = Number(item.price) * 0.96; // Cost per unit
+        if (isHotReload && itemCost === 0) {
+          itemCost = Number(item.price) * 0.96; 
         }
 
         return acc + (itemCost * Number(item.quantity));
@@ -484,9 +500,9 @@ const App: React.FC = () => {
         for (const oldItem of oldTx.items) {
           const product = products.find(p => p.id === oldItem.productId);
           const productCategory = categories.find(c => c.id === product?.categoryId);
-          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-            (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-          const amountToRestore = isReload ? (Number(oldItem.price) * Number(oldItem.quantity) * 0.96) : Number(oldItem.quantity);
+          const categoryName = (productCategory?.name || '').toUpperCase();
+          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+          const amountToRestore = isHotReload ? (Number(oldItem.price) * Number(oldItem.quantity) * 0.96) : Number(oldItem.quantity);
           stockChanges.set(oldItem.productId, (stockChanges.get(oldItem.productId) || 0) + amountToRestore);
         }
       }
@@ -495,9 +511,9 @@ const App: React.FC = () => {
         for (const newItem of tx.items) {
           const product = products.find(p => p.id === newItem.productId);
           const productCategory = categories.find(c => c.id === product?.categoryId);
-          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-            (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-          const amountToDeduct = isReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
+          const categoryName = (productCategory?.name || '').toUpperCase();
+          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+          const amountToDeduct = isHotReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
           stockChanges.set(newItem.productId, (stockChanges.get(newItem.productId) || 0) - amountToDeduct);
         }
       }
@@ -508,10 +524,9 @@ const App: React.FC = () => {
           if (product) {
             const bStocks = { ...(product.branchStocks || {}) };
             const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-            const productCategory = categories.find(c => c.id === product.categoryId);
-            const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-              (product.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
-            bStocks[stockBranch] = isReload ? (Number(currentStock) + netChange) : Math.max(0, Number(currentStock) + netChange);
+            const categoryName = (productCategory?.name || '').toUpperCase();
+            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+            bStocks[stockBranch] = isHotReload ? (Number(currentStock) + netChange) : Math.max(0, Number(currentStock) + netChange);
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
@@ -622,7 +637,7 @@ const App: React.FC = () => {
       if (vendor) {
         let vDiff = 0;
         // FIX: Only reverse if it was a CREDIT purchase or a SETTLEMENT
-        if (tx.type === 'PURCHASE' && !tx.id.startsWith('PU-') && tx.paymentMethod === 'CREDIT') vDiff = -Number(tx.amount);
+        if (tx.type === 'PURCHASE' && tx.paymentMethod === 'CREDIT') vDiff = -Number(tx.amount);
         else if (tx.type === 'CREDIT_PAYMENT') vDiff = Number(tx.amount);
 
         if (vDiff !== 0) {
@@ -674,10 +689,10 @@ const App: React.FC = () => {
           const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
 
           const productCategory = categories.find(c => c.id === product?.categoryId);
-          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-            (product?.categoryId && product.categoryId.toUpperCase().includes('RELOAD'));
+          const categoryName = (productCategory?.name || '').toUpperCase();
+          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
-          const amountToRestore = isReload ? (Number(item.price) * Number(item.quantity) * 0.96) : Number(item.quantity);
+          const amountToRestore = isHotReload ? (Number(item.price) * Number(item.quantity) * 0.96) : Number(item.quantity);
 
           bStocks[stockBranch] = Number(currentStock) + amountToRestore;
 
@@ -811,7 +826,8 @@ const App: React.FC = () => {
 
   const handleReceivePO = async (poId: string) => {
     const po = purchaseOrders.find(p => p.id === poId);
-    if (!po || po.status !== 'PENDING') return;
+    const allowedStatuses: POStatus[] = ['PENDING', 'RECEIVED', 'DRAFT'];
+    if (!po || !allowedStatuses.includes(po.status)) return;
 
     // VITAL SAFETY CHECK: Prevent double-receiving if a transaction already exists for this PO
     const existingTx = transactions.find(t =>
@@ -819,8 +835,12 @@ const App: React.FC = () => {
       (t.type === 'PURCHASE' && t.description?.includes(poId))
     );
     if (existingTx) {
-      alert(`SYSTEM ALERT: A stock receipt transaction for PO ${poId} already exists in the ledger (${existingTx.id}). To prevent duplicate stock, this action has been blocked. If you need to re-receive, please delete the old transaction first.`);
-      return;
+      const confirmReplace = window.confirm(`A stock receipt for PO ${poId} already exists in the ledger (${existingTx.id}).\n\nTo prevent duplicate stock, would you like to automatically DELETE the old transaction and re-receive this PO?`);
+      if (confirmReplace) {
+        await handleDeleteGlobalTransaction(existingTx.id);
+      } else {
+        return;
+      }
     }
 
     const updatedPO: PurchaseOrder = {
@@ -1145,13 +1165,16 @@ const App: React.FC = () => {
   };
 
   const activeBranch = userProfile.branch;
-  const filteredDaySessions = daySessions.filter(s => s.branchId === activeBranch);
+  const filteredDaySessions = activeBranch === 'ALL' ? daySessions : daySessions.filter(s => s.branchId === activeBranch);
   const branchDaySession = filteredDaySessions.find(s => s.date === getLocalDateString());
 
-  const branchProducts = products.map(p => ({
-    ...p,
-    stock: p.stock
-  }));
+  const branchProducts = products.map(p => {
+    const stockBranch = getStockBranch(activeBranch);
+    if (activeBranch !== 'ALL' && p.branchStocks && p.branchStocks[stockBranch] !== undefined) {
+      return { ...p, stock: p.branchStocks[stockBranch] };
+    }
+    return { ...p, stock: p.stock }; // Default to global sum or master stock
+  });
   if (isLoading || isRestoring) {
     return (
       <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6">
@@ -1164,7 +1187,7 @@ const App: React.FC = () => {
   }
 
   if (currentView === 'LOGIN') {
-    return <Login onLogin={handleLogin} onSignUp={handleLogin} userProfile={userProfile} />;
+    return <Login onLogin={handleLogin} onSignUp={handleLogin} userProfile={userProfile} users={users} />;
   }
 
 
@@ -1270,6 +1293,7 @@ const App: React.FC = () => {
           {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={handleUpsertPO} onReceivePO={handleReceivePO} onDeletePO={handleDeletePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResyncBalances={handleResyncBalances} />}
           {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
           {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} userProfile={userProfile} />}
+          {currentView === 'USER_CONTROL' && <UserControl userProfile={userProfile} />}
 
         </div >
       </main >

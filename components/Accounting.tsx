@@ -33,7 +33,10 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
     React.useEffect(() => {
         if (!startDate) setStartDate(getFirstDayOfMonth());
         if (!endDate) setEndDate(getTodayLocal());
-    }, []);
+        if (!userProfile.isAdmin && userProfile.branch) {
+            setSelectedCashier(userProfile.branch);
+        }
+    }, [userProfile]);
 
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
@@ -45,17 +48,20 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
     }, [transactions, startDate, endDate, selectedCashier]);
 
     // Helper to identify a reload item robustly
-    const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
+    // Helper to identify a hot reload item (Digital only, excludes RELOAD CARD)
+    const isHotReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
         const pName = (product?.name || "").toUpperCase();
         const cName = (category?.name || "").toUpperCase();
         const pId = (item.productId || "").toUpperCase();
         const desc = txDescription.toUpperCase();
 
+        // If category is "RELOAD CARD", it's a physical item, not a hot reload
+        if (cName.includes('CARD')) return false;
+
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||
             pId.includes('RELOAD') ||
             desc.includes('RELOAD') ||
-            // Also check provider names if not explicitly labeled reload
             pName.includes('DIALOG') || pName.includes('MOBITEL') || pName.includes('AIRTEL') || pName.includes('HUTCH') ||
             cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
     };
@@ -143,7 +149,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 const p = products.find(prod => prod.id === item.productId);
                 if (p) {
                     const category = categories.find(c => c.id === p.categoryId);
-                    if (isReloadItem(item, p, category, t.description)) {
+                    if (isHotReloadItem(item, p, category, t.description)) {
                         // Reload cost approx 96%
                         fallback += (Number(item.price) * Number(item.quantity) * 0.96);
                     } else {
@@ -216,7 +222,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                         const category = product?.categoryId ? categories.find(c => c.id === product.categoryId) : undefined;
 
                         // Exclude reload items from category report revenue/profit
-                        if (isReloadItem(item, product, category, t.description)) return;
+                        // Exclude hot reload items from category report revenue/profit (covered by total line)
+                        if (isHotReloadItem(item, product, category, t.description)) return;
 
                         const categoryName = category?.name || 'Uncategorized';
                         const revenue = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
@@ -277,7 +284,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                         const category = categories.find(c => c.id === p?.categoryId);
                         const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-                        if (isReloadItem(item, p, category, t.description)) {
+                        if (isHotReloadItem(item, p, category, t.description)) {
                             const rate = getReloadProfitRate(item, p, category, t.description);
                             const rProfit = lineTotal * rate;
                             dayMap[txDateKey].reloadRevenue += lineTotal;
@@ -290,7 +297,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                     });
                 } else {
                     const amount = Number(t.amount || 0);
-                    if (t.description.toUpperCase().includes('RELOAD')) {
+                    const isHot = t.description.toUpperCase().includes('RELOAD') && !t.description.toUpperCase().includes('CARD');
+                    if (isHot) {
                         const rate = getReloadProfitRate(null, undefined, undefined, t.description);
                         const rProfit = amount * rate;
                         dayMap[txDateKey].reloadRevenue += amount;
@@ -540,7 +548,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                                     onChange={(e) => setSelectedCashier(e.target.value)}
                                     className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-bold text-xs md:text-sm bg-white min-w-[140px]"
                                 >
-                                    <option value="ALL CASHIERS">ALL CASHIERS</option>
+                                    {userProfile.isAdmin && <option value="ALL CASHIERS">ALL CASHIERS</option>}
                                     {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3']).map(branch => (
                                         <option key={branch} value={branch}>{branch}</option>
                                     ))}

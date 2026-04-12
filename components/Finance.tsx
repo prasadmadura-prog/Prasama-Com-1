@@ -76,12 +76,14 @@ const Finance: React.FC<FinanceProps> = ({
    // 1. Transactions for the selected period (Date Range or Today)
    const periodTransactions = useMemo(() => {
       const isFiltering = startDate !== today || endDate !== today;
-      if (!isFiltering) return dayTransactions;
+      if (!isFiltering) return dayTransactions.filter(t => userProfile.isAdmin || t.branchId === userProfile.branch);
       return transactions.filter(t => {
-         const txDate = t.date.split('T')[0];
-         return txDate >= startDate && txDate <= endDate;
-      });
-   }, [transactions, startDate, endDate, dayTransactions, today]);
+          const txDate = t.date.split('T')[0];
+          const matchesDate = txDate >= startDate && txDate <= endDate;
+          const matchesBranch = userProfile.isAdmin || t.branchId === userProfile.branch;
+          return matchesDate && matchesBranch;
+       });
+   }, [transactions, startDate, endDate, dayTransactions, today, userProfile]);
 
    // Column Filters
    const [filterEntity, setFilterEntity] = useState('');

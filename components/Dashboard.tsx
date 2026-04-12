@@ -68,12 +68,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         const p = products.find(prod => prod.id === item.productId);
         if (p) {
           const productCategory = categories.find(c => c.id === p.categoryId);
-          const isReload = (productCategory?.name || '').toUpperCase().includes('RELOAD') ||
-            (p.categoryId && p.categoryId.toUpperCase().includes('RELOAD'));
+          const categoryName = (productCategory?.name || '').toUpperCase();
+          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
           let itemCost = Number(p.cost || 0);
-          if (isReload) {
-            // Reload Cost = 96% of Selling Price
+          if (isHotReload) {
+            // Hot Reload Cost = 96% of Selling Price
             itemCost = Number(item.price) * 0.96;
           }
           fallback += itemCost * Number(item.quantity);
@@ -82,7 +82,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       return fallback;
     };
 
-    // Calculate revenue (EXCLUDING reload) and reload sales separately
+    // Calculate revenue (EXCLUDING hot reload) and hot reload sales separately
     let revenue = 0;
     let reloadSales = 0;
     let todayCOGS = 0;
@@ -94,11 +94,12 @@ const Dashboard: React.FC<DashboardProps> = ({
           t.items.forEach(item => {
             const p = products.find(prod => prod.id === item.productId);
             const productCategory = categories.find(c => c.id === p?.categoryId);
-            const isReload = productCategory?.name?.toLowerCase() === 'reload';
+            const categoryName = (productCategory?.name || '').toUpperCase();
+            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
             const itemTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-            if (isReload) {
+            if (isHotReload) {
               reloadSales += itemTotal;
             } else {
               revenue += itemTotal;
@@ -112,10 +113,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
       });
 
-    // Profit = (Non-Reload Revenue - Cost) + 4% of Reload Sales
+    // Profit = (Retail Revenue - Cost) + 4% of Hot Reload Sales
     const profit = (revenue - todayCOGS) + (reloadSales * 0.04);
-
-    // MATCH POS LOGIC: Revenue (Inflow) includes 4% of Reload Sales
     const effectiveRevenue = revenue + (reloadSales * 0.04);
     const margin = effectiveRevenue > 0 ? (profit / effectiveRevenue) * 100 : 0;
 
@@ -442,10 +441,14 @@ const Dashboard: React.FC<DashboardProps> = ({
               onChange={(e) => setBranchFilter(e.target.value)}
               className="bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm outline-none text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:border-indigo-200 transition-all cursor-pointer"
             >
-              <option value="ALL">All Terminals</option>
-              {userProfile.allBranches.map(b => (
-                <option key={b} value={b}>{b}</option>
-              ))}
+              {userProfile.isAdmin && <option value="ALL">All Terminals</option>}
+                .filter(b => {
+                  if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
+                  return true;
+                })
+                .map(b => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
             </select>
           )}
           <div className="bg-white px-6 py-3 rounded-full border border-slate-100 shadow-sm flex items-center gap-3">

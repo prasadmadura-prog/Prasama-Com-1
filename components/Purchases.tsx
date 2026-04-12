@@ -878,8 +878,13 @@ const Purchases: React.FC<PurchasesProps> = ({
                     </td>
                     <td className="px-8 py-5 text-center">
                       <div className="flex justify-center gap-2">
-                        {(po.status === 'PENDING' || po.status === 'DRAFT') && (
-                          <button onClick={() => { setSelectedPO(po); setIsReceiptModalOpen(true); }} className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-md">Receive</button>
+                        {po.status !== 'VOID' && (
+                          <button 
+                            onClick={() => { setSelectedPO(po); setIsReceiptModalOpen(true); }} 
+                            className={`px-4 py-2 text-white rounded-xl text-[9px] font-black uppercase tracking-widest shadow-md transition-all ${po.status === 'RECEIVED' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                          >
+                            {po.status === 'RECEIVED' ? 'Re-receive' : 'Receive'}
+                          </button>
                         )}
                         <button onClick={() => printPurchaseOrder(po)} className="p-2 border border-slate-200 rounded-lg hover:bg-white transition-all shadow-sm" title="Review Invoice">👁️</button>
                         <button onClick={() => openPOModal(po)} className="p-2 border border-slate-200 rounded-lg hover:bg-white transition-all shadow-sm" title="Edit Order">✏️</button>

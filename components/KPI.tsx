@@ -55,6 +55,8 @@ const KPI: React.FC<KPIProps> = ({
         return b;
     };
 
+
+
     // Helper to get reload commission rate based on provider
     const getReloadRate = (txDescription: string = '', productName: string = '') => {
         const desc = txDescription.toUpperCase();
@@ -65,18 +67,19 @@ const KPI: React.FC<KPIProps> = ({
         return isMobitelOrHutch ? 0.06 : 0.04;
     };
 
-    // Helper to identify a reload item robustly
-    const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
+    // Helper to identify a hot reload item robustly (Digital only, excludes RELOAD CARD)
+    const isHotReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
         const pName = (product?.name || "").toUpperCase();
         const cName = (category?.name || "").toUpperCase();
         const pId = (item.productId || "").toUpperCase();
         const desc = txDescription.toUpperCase();
 
+        if (cName.includes('CARD')) return false;
+
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||
             pId.includes('RELOAD') ||
             desc.includes('RELOAD') ||
-            // Also check provider names if not explicitly labeled reload
             pName.includes('DIALOG') || pName.includes('MOBITEL') || pName.includes('AIRTEL') || pName.includes('HUTCH') ||
             cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
     };
@@ -107,7 +110,7 @@ const KPI: React.FC<KPIProps> = ({
                     const category = categories.find(c => c.id === product?.categoryId);
                     const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-                    if (isReloadItem(item, product, category, t.description)) {
+                    if (isHotReloadItem(item, product, category, t.description)) {
                         return itemAcc + (lineTotal * getReloadRate(t.description, product?.name));
                     }
                     return itemAcc + lineTotal;
@@ -145,7 +148,7 @@ const KPI: React.FC<KPIProps> = ({
                 t.items.forEach(i => {
                     const p = products.find(prod => prod.id === i.productId);
                     const category = categories.find(c => c.id === p?.categoryId);
-                    if (p && !isReloadItem(i, p, category, t.description)) {
+                    if (p && !isHotReloadItem(i, p, category, t.description)) {
                         totalCost += Number(p.cost || 0) * Number(i.quantity);
                     }
                 });
@@ -183,7 +186,10 @@ const KPI: React.FC<KPIProps> = ({
                     const category = categories.find(c => c.id === catId);
 
                     const lineTotal = i.quantity * i.price; // Gross
-                    const value = isReloadItem(i, p, category, t.description) ? lineTotal * getReloadRate(t.description, p?.name) : lineTotal;
+                    const category = categories.find(c => c.id === catId);
+
+                    const lineTotal = i.quantity * i.price; // Gross
+                    const value = isHotReloadItem(i, p, category, t.description) ? lineTotal * getReloadRate(t.description, p?.name) : lineTotal;
 
                     catMap[catName] = (catMap[catName] || 0) + value;
                 }
@@ -216,11 +222,11 @@ const KPI: React.FC<KPIProps> = ({
 
                     const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
+                    const cost = Number(product?.cost || 0) * Number(item.quantity);
                     let profit = 0;
-                    if (isReloadItem(item, product, category, t.description)) {
+                    if (isHotReloadItem(item, product, category, t.description)) {
                         profit = lineTotal * getReloadRate(t.description, product?.name);
                     } else {
-                        const cost = Number(product?.cost || 0) * Number(item.quantity);
                         profit = lineTotal - cost;
                     }
 
@@ -259,11 +265,11 @@ const KPI: React.FC<KPIProps> = ({
                     const category = categories.find(c => c.id === product.categoryId);
                     const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
+                    const cost = Number(product.cost || 0) * Number(item.quantity);
                     let profit = 0;
-                    if (isReloadItem(item, product, category, t.description)) {
+                    if (isHotReloadItem(item, product, category, t.description)) {
                         profit = lineTotal * getReloadRate(t.description, product.name);
                     } else {
-                        const cost = Number(product.cost || 0) * Number(item.quantity);
                         profit = lineTotal - cost;
                     }
 
@@ -321,7 +327,7 @@ const KPI: React.FC<KPIProps> = ({
                         const category = categories.find(c => c.id === product?.categoryId);
                         const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-                        if (isReloadItem(item, product, category, t.description)) {
+                        if (isHotReloadItem(item, product, category, t.description)) {
                             hours[hour].reloadRevenue += (lineTotal * getReloadRate(t.description, product?.name));
                         } else {
                             hours[hour].generalRevenue += lineTotal;
@@ -367,7 +373,7 @@ const KPI: React.FC<KPIProps> = ({
                         const category = categories.find(c => c.id === p?.categoryId);
                         const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
-                        if (isReloadItem(i, p, category, t.description)) {
+                        if (isHotReloadItem(i, p, category, t.description)) {
                             stats[tDate] += (lineTotal * getReloadRate(t.description, p?.name));
                         } else {
                             const cost = Number(p?.cost || 0) * Number(i.quantity);
@@ -426,7 +432,7 @@ const KPI: React.FC<KPIProps> = ({
                         const category = categories.find(c => c.id === p?.categoryId);
                         const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
-                        if (isReloadItem(i, p, category, t.description)) {
+                        if (isHotReloadItem(i, p, category, t.description)) {
                             stats[tDate].profit += (lineTotal * getReloadRate(t.description, p?.name));
                         } else {
                             const cost = Number(p?.cost || 0) * Number(i.quantity);
@@ -588,10 +594,15 @@ const KPI: React.FC<KPIProps> = ({
                             onChange={(e) => setBranchFilter(e.target.value)}
                             className="bg-white px-6 py-4 rounded-2xl border border-slate-100 shadow-sm outline-none text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:border-indigo-200 transition-all cursor-pointer h-[60px]"
                         >
-                            <option value="ALL">All Terminals</option>
-                            {userProfile.allBranches.map(b => (
-                                <option key={b} value={b}>{b}</option>
-                            ))}
+                            {userProfile.isAdmin && <option value="ALL">All Terminals</option>}
+                            {userProfile.allBranches
+                                .filter(b => {
+                                    if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
+                                    return true;
+                                })
+                                .map(b => (
+                                    <option key={b} value={b}>{b}</option>
+                                ))}
                         </select>
                     )}
                 </div>

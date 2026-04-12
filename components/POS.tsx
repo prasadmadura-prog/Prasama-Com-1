@@ -144,16 +144,15 @@ const POS: React.FC<POSProps> = ({
       if (isSale) {
         if (t.items && t.items.length > 0) {
           t.items.forEach(item => {
+            const itemTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
             const product = products.find(p => p.id === item.productId);
             const category = categories.find(c => c.id === product?.categoryId);
-            const isReload = category?.name?.toLowerCase() === 'reload';
+            const categoryName = (category?.name || "").toUpperCase();
+            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
-            const itemTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
-
-            if (isReload) {
+            if (isHotReload) {
               txReloadSales += itemTotal;
               txProfit += (itemTotal * 0.04);
-              // For revenue/inflow, reloads are counted fully as cash in
               txRevenue += itemTotal;
             } else {
               txRevenue += itemTotal;
@@ -303,12 +302,12 @@ const POS: React.FC<POSProps> = ({
     const amount = parseFloat(amountStr);
     if (isNaN(amount) || amount <= 0) return alert("Invalid Amount");
 
-    // 4% Profit Margin Logic: Cost is 96% of the Sales Price
-    const costPrice = amount * 0.96;
-
     // Search for existing Inventory Product
     const targetName = `RELOAD ${provider}`;
     const existingProduct = products.find(p => p.name === targetName);
+
+    // 4% Profit Margin Logic for digital reloads: Cost is 96% of the Sales Price
+    const costPrice = amount * 0.96;
 
     const reloadProduct: Product = existingProduct ? {
       ...existingProduct,
@@ -718,15 +717,19 @@ const POS: React.FC<POSProps> = ({
             />
           </div>
           {/* CASHIER 1 */}
-          <div className="text-right flex flex-col items-end justify-center h-full">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Cashier 1</p>
-            <p className="text-lg font-black font-mono text-slate-800 leading-none mb-0.5">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.revenue || 0).toLocaleString()}</p>
-            <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-              <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">Profit</span>
-              <span className="text-[9px] font-black font-mono text-slate-600 leading-none">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.profit || 0).toLocaleString()}</span>
-            </div>
-          </div>
-          <div className="w-px h-8 bg-slate-100"></div>
+          {(userProfile.isAdmin || userProfile.branch !== 'CASHIER 2') && (
+            <>
+              <div className="text-right flex flex-col items-end justify-center h-full">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Cashier 1</p>
+                <p className="text-lg font-black font-mono text-slate-800 leading-none mb-0.5">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.revenue || 0).toLocaleString()}</p>
+                <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                  <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">Profit</span>
+                  <span className="text-[9px] font-black font-mono text-slate-600 leading-none">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.profit || 0).toLocaleString()}</span>
+                </div>
+              </div>
+              <div className="w-px h-8 bg-slate-100"></div>
+            </>
+          )}
 
           {/* CASHIER 2 */}
           <div className="text-right flex flex-col items-end justify-center h-full">
@@ -737,17 +740,21 @@ const POS: React.FC<POSProps> = ({
               <span className="text-[9px] font-black font-mono text-slate-600 leading-none">Rs. {Math.round(dailySummary.branchStats['CASHIER 2']?.profit || 0).toLocaleString()}</span>
             </div>
           </div>
-          <div className="w-px h-8 bg-slate-100"></div>
 
           {/* RELOAD SALES */}
-          <div className="text-right flex flex-col items-end justify-center h-full">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Reload Sales</p>
-            <p className="text-lg font-black font-mono text-rose-600 leading-none mb-0.5">Rs. {Math.round(dailySummary.reloadSales || 0).toLocaleString()}</p>
-            <div className="flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
-              <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tight">Profit</span>
-              <span className="text-[9px] font-black font-mono text-emerald-600 leading-none">Rs. {Math.round((dailySummary.reloadSales || 0) * 0.04).toLocaleString()}</span>
-            </div>
-          </div>
+          {(userProfile.isAdmin || userProfile.loginUsername !== 'madupathirana95@gmail.com') && (
+            <>
+              <div className="w-px h-8 bg-slate-100"></div>
+              <div className="text-right flex flex-col items-end justify-center h-full">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Reload Sales</p>
+                <p className="text-lg font-black font-mono text-rose-600 leading-none mb-0.5">Rs. {Math.round(dailySummary.reloadSales || 0).toLocaleString()}</p>
+                <div className="flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                  <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tight">Profit</span>
+                  <span className="text-[9px] font-black font-mono text-emerald-600 leading-none">Rs. {Math.round((dailySummary.reloadSales || 0) * 0.04).toLocaleString()}</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

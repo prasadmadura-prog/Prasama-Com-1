@@ -88,9 +88,15 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
             discount: 0
         };
 
-        // Commission: Mobitel/Hutch 6%, others 4%
+        // Commission: Mobitel/Hutch 6%, others 4% (Digital Hot Reload)
+        const categoryName = (existingProduct?.categoryId ? categories.find(c => c.id === existingProduct.categoryId)?.name || "" : "").toUpperCase();
+        const isReloadCard = categoryName.includes('RELOAD CARD');
+
         const rate = (provider === 'MOBITEL' || provider === 'HUTCH') ? 0.06 : 0.04;
-        const costBasis = reloadAmount * (1 - rate);
+        const defaultCostBasis = reloadAmount * (1 - rate);
+
+        // Use inventory cost IF it's a RELOAD CARD (Normal Setting), otherwise use Hot Reload logic
+        const costBasis = isReloadCard && existingProduct ? (Number(existingProduct.cost) * (reloadAmount / Number(existingProduct.price || 1))) : defaultCostBasis;
 
         const txPayload = {
             id: txId,
@@ -240,9 +246,14 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                         discount: 0
                     };
 
-                    // Commission: Mobitel/Hutch 6%, others 4%
+                    // Commission: Mobitel/Hutch 6%, others 4% (Digital Hot Reload)
+                    const categoryName = (existingProduct?.categoryId ? categories.find(c => c.id === existingProduct.categoryId)?.name || "" : "").toUpperCase();
+                    const isReloadCard = categoryName.includes('RELOAD CARD');
+
                     const rate = (importProvider === 'MOBITEL' || importProvider === 'HUTCH') ? 0.06 : 0.04;
-                    const costBasis = Math.abs(amount) * (1 - rate);
+                    const defaultCostBasis = Math.abs(amount) * (1 - rate);
+
+                    const costBasis = isReloadCard && existingProduct ? (Number(existingProduct.cost) * (Math.abs(amount) / Number(existingProduct.price || 1))) : defaultCostBasis;
 
                     let type: 'SALE' | 'CREDIT_PAYMENT' = 'SALE';
                     let finalAmount = amount;

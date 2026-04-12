@@ -39,6 +39,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'ACCOUNTING', label: 'Accounting', icon: '📈' },
     { id: 'RELOAD', label: 'Reload', icon: '📱' },
     { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '✍️' },
+    ...(userProfile.isAdmin ? [{ id: 'USER_CONTROL', label: 'User Control', icon: '🛡️' }] : []),
     { id: 'SETTINGS', label: 'Settings', icon: '⚙️' },
   ];
 
@@ -74,9 +75,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onChange={(e) => onSwitchBranch?.(e.target.value)}
                   className="mt-1 block w-full bg-transparent border-none text-[10px] text-indigo-300 font-bold uppercase tracking-widest outline-none cursor-pointer hover:text-indigo-200 transition-colors"
                 >
-                  {userProfile.allBranches.map(b => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
+                    .filter(b => {
+                      if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
+                      return true;
+                    })
+                    .map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
                 </select>
               ) : (
                 <p className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest opacity-80">{userProfile.branch}</p>
