@@ -27,7 +27,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
   const [settings, setSettings] = useState<PrintSettings>({
     labelSize: 'MEDIUM',
-    columns: 3,
+    columns: 4,
     showPrice: true,
     showSKU: true,
     showName: true,
