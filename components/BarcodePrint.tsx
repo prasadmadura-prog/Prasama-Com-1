@@ -105,27 +105,26 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             grid-template-columns: repeat(${settings.columns}, 1fr);
             align-content: start;
             gap: 2mm;
-            width: ${currentPaper.width};
+            width: 100%;
             margin: 0 auto;
+            box-sizing: border-box;
           }
           .label {
             border: 0.1mm dashed #ccc;
             border-radius: 0;
             width: 100%;
-            max-width: ${labelDim.w};
             height: ${labelDim.h};
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: flex-start;
             text-align: center;
-            padding: 0.5mm;
+            padding: 1mm;
             box-sizing: border-box;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid;
             background: #fff;
-            margin: 1mm auto;
             position: relative;
           }
           .name { 
