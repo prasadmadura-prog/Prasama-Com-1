@@ -91,13 +91,14 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
         <title>Barcode Print Manifest</title>
         <style>
           @page { size: ${settings.paperSize === 'ROLL' ? '80mm auto' : settings.paperSize.toLowerCase()}; margin: 5mm; }
-          body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background: white; }
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background: white; width: ${paperWidth}; }
           .grid {
             display: grid;
             grid-template-columns: repeat(${settings.columns}, 1fr);
             align-content: start;
-            gap: 2mm;
-            width: ${paperWidth};
+            gap: 1.5mm;
+            width: 100%;
           }
           .label {
             border: 0.1mm solid #eee;

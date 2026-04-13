@@ -99,15 +99,14 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
         <title>Barcode Print Manifest</title>
         <style>
           @page { size: ${currentPaper.style}; margin: 5mm; }
-          body { margin: 0; padding: 0; font-family: 'Times New Roman', Times, serif; background: white; }
+          * { box-sizing: border-box; }
+          body { margin: 0; padding: 0; font-family: 'Times New Roman', Times, serif; background: white; width: ${currentPaper.width}; }
           .grid {
             display: grid;
             grid-template-columns: repeat(${settings.columns}, 1fr);
             align-content: start;
-            gap: 2mm;
+            gap: 1.5mm;
             width: 100%;
-            margin: 0 auto;
-            box-sizing: border-box;
           }
           .label {
             border: 0.1mm dashed #ccc;
