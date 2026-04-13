@@ -80,8 +80,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
     if (!printWindow) return;
 
     const labelDim = {
-      SMALL: { h: '25mm', w: '42mm', f: '8px', bh: 30, bw: 1.2 },
-      MEDIUM: { h: '45mm', w: '65mm', f: '12px', bh: 100, bw: 2.0 },
+      SMALL: { h: '25mm', w: '42mm', f: '8px', bh: 28, bw: 1.0 },
+      MEDIUM: { h: '42mm', w: '46mm', f: '11px', bh: 85, bw: 1.8 },
       LARGE: { h: '60mm', w: '100mm', f: '16px', bh: 140, bw: 2.5 }
     }[settings.labelSize];
 
@@ -113,8 +113,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             border-radius: 0;
             width: 100%;
             max-width: ${labelDim.w};
-            min-height: ${labelDim.h};
-            height: auto;
+            height: ${labelDim.h};
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -122,8 +121,9 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             text-align: center;
             padding: 0.5mm;
             box-sizing: border-box;
-            overflow: visible;
+            overflow: hidden;
             page-break-inside: avoid;
+            break-inside: avoid;
             background: #fff;
             margin: 1mm auto;
             position: relative;
