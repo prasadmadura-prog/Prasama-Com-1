@@ -472,10 +472,18 @@ const POS: React.FC<POSProps> = ({
       creditLimit: parseFloat(newCusLimit) || 50000
     };
     onUpsertCustomer(newCustomer);
-    completeTransaction(newCustomer.id);
+    
+    // Select the new customer in the current session
+    setPosSession(prev => ({ ...prev, selectedPOSCustomerId: newCustomer.id }));
+    
+    // Close modals
+    setShowCustomerModal(false);
     setIsAddingCustomer(false);
     setNewCusName('');
     setNewCusPhone('');
+    
+    // If the user was specifically finalizing a credit/advance sale, they can now just click Authorize again.
+    // Or we could trigger it, but safer to let them review.
   };
 
   const printReceipt = (tx: any) => {
@@ -619,15 +627,64 @@ const POS: React.FC<POSProps> = ({
     );
   }
 
+  const shareInvoice = (tx: any, platform: 'SMS' | 'WHATSAPP') => {
+    const customer = customers.find(c => c.id === tx.customerId);
+    const phone = customer?.phone || '';
+    const bizName = userProfile.companyName || userProfile.name;
+    const message = `Hello ${customer?.name || 'Customer'},\n\nThank you for shopping at ${bizName}!\n\nInvoice: ${tx.id}\nDate: ${formatDate(tx.date)}\nTotal: Rs. ${Number(tx.amount).toLocaleString()}\n\nVisit us again!`;
+    const encodedMsg = encodeURIComponent(message);
+
+    if (platform === 'SMS') {
+      window.open(`sms:${phone}?body=${encodedMsg}`);
+    } else {
+      window.open(`https://wa.me/${phone?.replace(/\+/g, '')}?text=${encodedMsg}`);
+    }
+  };
+
   if (lastTx) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-md p-12 text-center space-y-8 animate-in zoom-in duration-300">
-          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto">✓</div>
-          <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tighter">Checkout Successful</h2>
+        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg p-12 text-center space-y-8 animate-in zoom-in duration-300">
+          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">✓</div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tighter">Checkout Successful</h2>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 font-mono">Ref: {lastTx.id}</p>
+          </div>
+          
+          <div className="bg-slate-50 rounded-[2rem] p-6 border border-slate-100 space-y-4">
+            <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
+              <span>Customer</span>
+              <span className="text-slate-900">{customers.find(c => c.id === lastTx.customerId)?.name || 'Walk-in'}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Net Total</span>
+              <span className="text-2xl font-black font-mono text-slate-900">Rs. {Number(lastTx.total || lastTx.amount).toLocaleString()}</span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => setLastTx(null)} className="bg-slate-900 text-white py-4 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg hover:bg-black transition-all">New Transaction</button>
-            <button onClick={() => printReceipt(lastTx)} className="bg-indigo-600 text-white py-4 rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg hover:bg-indigo-700 transition-all">Print Receipt</button>
+            <button onClick={() => setLastTx(null)} className="bg-slate-900 text-white py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl hover:bg-black transition-all active:scale-95">New Sale</button>
+            <button onClick={() => printReceipt(lastTx)} className="bg-indigo-600 text-white py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all active:scale-95">🖨️ Print Receipt</button>
+          </div>
+
+          <div className="h-px bg-slate-100 mx-10"></div>
+
+          <div className="space-y-3">
+             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic">Instant Digital Share</p>
+             <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => shareInvoice(lastTx, 'SMS')}
+                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-600 font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all active:scale-95"
+                >
+                  <span>💬</span> SMS Invoice
+                </button>
+                <button 
+                  onClick={() => shareInvoice(lastTx, 'WHATSAPP')}
+                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition-all active:scale-95"
+                >
+                  <span>📱</span> WhatsApp
+                </button>
+             </div>
           </div>
         </div>
       </div>
@@ -1042,11 +1099,24 @@ const POS: React.FC<POSProps> = ({
 
               {/* CUSTOMER SELECTION */}
               <div className="mt-2">
-                <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest block mb-1">Customer</label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest block">Customer</label>
+                  <button 
+                    onClick={() => {
+                        setNewCusName('');
+                        setNewCusPhone('');
+                        setIsAddingCustomer(true);
+                        setShowCustomerModal(true);
+                    }}
+                    className="text-[8px] font-black text-indigo-600 uppercase hover:underline"
+                  >
+                    + Add New
+                  </button>
+                </div>
                 <select
                   value={posSession.selectedPOSCustomerId || 'WALKING'}
                   onChange={(e) => setPosSession(prev => ({ ...prev, selectedPOSCustomerId: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-[10px] font-bold uppercase bg-white text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                  className="w-full px-3 py-2 rounded-xl border border-indigo-100 text-[10px] font-bold uppercase bg-white text-slate-700 outline-none focus:border-indigo-400 transition-all shadow-sm"
                 >
                   <option value="WALKING">🚶 Walking Customer</option>
                   {customers.map(c => (

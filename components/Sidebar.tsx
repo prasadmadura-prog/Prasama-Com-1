@@ -76,6 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onChange={(e) => onSwitchBranch?.(e.target.value)}
                   className="mt-1 block w-full bg-transparent border-none text-[10px] text-indigo-300 font-bold uppercase tracking-widest outline-none cursor-pointer hover:text-indigo-200 transition-colors"
                 >
+                  {userProfile.allBranches
                     .filter(b => {
                       if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
                       return true;

@@ -184,10 +184,6 @@ const KPI: React.FC<KPIProps> = ({
                     const catId = p.categoryId || 'Uncategorized';
                     const catName = categories.find(c => c.id === catId)?.name || 'Uncategorized';
                     const category = categories.find(c => c.id === catId);
-
-                    const lineTotal = i.quantity * i.price; // Gross
-                    const category = categories.find(c => c.id === catId);
-
                     const lineTotal = i.quantity * i.price; // Gross
                     const value = isHotReloadItem(i, p, category, t.description) ? lineTotal * getReloadRate(t.description, p?.name) : lineTotal;
 
@@ -517,7 +513,7 @@ const KPI: React.FC<KPIProps> = ({
                         const p = products.find(prod => prod.id === i.productId);
                         const category = categories.find(c => c.id === p?.categoryId);
 
-                        if (isReloadItem(i, p, category, t.description)) {
+                        if (isHotReloadItem(i, p, category, t.description)) {
                             const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
 
                             // Determine provider from product name first, then description

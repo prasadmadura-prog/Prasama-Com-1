@@ -95,12 +95,14 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           .grid {
             display: grid;
             grid-template-columns: repeat(${settings.columns}, 1fr);
+            align-content: start;
             gap: 2mm;
             width: ${paperWidth};
           }
           .label {
             border: 0.1mm solid #eee;
-            height: ${labelDim.h};
+            min-height: ${labelDim.h};
+            height: auto;
             display: flex;
             flex-direction: column;
             align-items: center;

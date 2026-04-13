@@ -155,19 +155,27 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleExportCatalog = () => {
     if (products.length === 0) return alert("Catalog is empty.");
-    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Primary Vendor', 'Alert Threshold'];
-    const rows = products.map(p => [
-      p.name.replace(/,/g, ''),
-      p.sku,
-      p.cost,
-      p.price,
-      p.stock,
-      getCategoryName(p.categoryId).replace(/,/g, ''),
-      (vendors.find(v => v.id === p.vendorId)?.name || 'INTERNAL').replace(/,/g, ''),
-      p.lowStockThreshold
-    ]);
+    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Total Cost Value', 'Total Sales Value', 'Category', 'Primary Vendor', 'Alert Threshold'];
+    const rows = products.map(p => {
+      const cost = Number(p.cost) || 0;
+      const price = Number(p.price) || 0;
+      const stock = Number(p.stock) || 0;
+      
+      return [
+        p.name.replace(/,/g, ''),
+        `\t${p.sku}`, // Force text mode for Excel to prevent scientific notation
+        cost,
+        price,
+        stock,
+        (cost * stock).toFixed(2),
+        (price * stock).toFixed(2),
+        getCategoryName(p.categoryId).replace(/,/g, ''),
+        (vendors.find(v => v.id === p.vendorId)?.name || 'INTERNAL').replace(/,/g, ''),
+        p.lowStockThreshold
+      ];
+    });
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

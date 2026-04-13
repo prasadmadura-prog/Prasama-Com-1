@@ -71,6 +71,7 @@ const Finance: React.FC<FinanceProps> = ({
    const [accName, setAccName] = useState('');
    const [accNum, setAccNum] = useState('');
    const [accBal, setAccBal] = useState('');
+   const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
 
    // Filtered transactions based on date range
    // 1. Transactions for the selected period (Date Range or Today)
@@ -78,7 +79,7 @@ const Finance: React.FC<FinanceProps> = ({
       const isFiltering = startDate !== today || endDate !== today;
       if (!isFiltering) return dayTransactions.filter(t => userProfile.isAdmin || t.branchId === userProfile.branch);
       return transactions.filter(t => {
-          const txDate = t.date.split('T')[0];
+          const txDate = (t.date || '').split('T')[0];
           const matchesDate = txDate >= startDate && txDate <= endDate;
           const matchesBranch = userProfile.isAdmin || t.branchId === userProfile.branch;
           return matchesDate && matchesBranch;
@@ -226,15 +227,27 @@ const Finance: React.FC<FinanceProps> = ({
    const handleAccountSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (!accName) return;
-      onUpsertAccount({
-         id: `ACC-${Date.now()}`,
+      
+      const accountData: BankAccount = {
+         id: editingAccount?.id || `ACC-${Date.now()}`,
          name: accName.toUpperCase(),
          accountNumber: accNum,
          balance: parseFloat(accBal) || 0
-      });
+      };
+
+      onUpsertAccount(accountData);
+      
       setAccName('');
       setAccNum('');
       setAccBal('');
+      setEditingAccount(null);
+   };
+
+   const openEditAccount = (acc: BankAccount) => {
+      setEditingAccount(acc);
+      setAccName(acc.name);
+      setAccNum(acc.accountNumber || '');
+      setAccBal(acc.balance.toString());
    };
 
    const openEditExpense = (tx: Transaction) => {
@@ -729,19 +742,28 @@ const Finance: React.FC<FinanceProps> = ({
                                        <p className="text-xl font-black font-mono text-slate-900 tracking-tighter">Rs. {acc.balance.toLocaleString()}</p>
                                        <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Liquid Reserve</p>
                                     </div>
-                                    {acc.id !== 'cash' && (
+                                    <div className="flex flex-col gap-2">
                                        <button
-                                          onClick={() => {
-                                             if (window.confirm("Are you sure you want to delete this account? Any remaining balance will be transferred to the Main Cash Drawer.")) {
-                                                onDeleteAccount(acc.id);
-                                             }
-                                          }}
-                                          className="w-8 h-8 flex items-center justify-center rounded-full bg-rose-100 text-rose-600 hover:bg-rose-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                                          title="Delete Account & Merge Balance"
+                                          onClick={() => openEditAccount(acc)}
+                                          className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all opacity-0 group-hover:opacity-100 shadow-sm"
+                                          title="Edit Account Details"
                                        >
-                                          &times;
+                                          ✏️
                                        </button>
-                                    )}
+                                       {acc.id !== 'cash' && (
+                                          <button
+                                             onClick={() => {
+                                                if (window.confirm("Are you sure you want to delete this account? Any remaining balance will be transferred to the Main Cash Drawer.")) {
+                                                   onDeleteAccount(acc.id);
+                                                }
+                                             }}
+                                             className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-slate-200 text-rose-600 hover:bg-rose-600 hover:text-white transition-all opacity-0 group-hover:opacity-100 shadow-sm"
+                                             title="Delete Account & Merge Balance"
+                                          >
+                                             &times;
+                                          </button>
+                                       )}
+                                    </div>
                                  </div>
                               </div>
                            ))}
@@ -749,12 +771,19 @@ const Finance: React.FC<FinanceProps> = ({
                      </div>
 
                      <div className="w-full lg:w-80 space-y-6">
-                        <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest border-b border-slate-100 pb-2">Link New Account</h4>
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                           <h4 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">{editingAccount ? 'Modify Node' : 'Link New Account'}</h4>
+                           {editingAccount && (
+                              <button onClick={() => { setEditingAccount(null); setAccName(''); setAccNum(''); setAccBal(''); }} className="text-[8px] font-black text-rose-500 uppercase hover:underline">Cancel</button>
+                           )}
+                        </div>
                         <form onSubmit={handleAccountSubmit} className="space-y-4">
                            <input required className="w-full px-5 py-3 rounded-xl border border-slate-200 font-bold uppercase text-xs" placeholder="BANK NAME" value={accName} onChange={e => setAccName(e.target.value)} />
                            <input className="w-full px-5 py-3 rounded-xl border border-slate-200 font-mono text-xs" placeholder="ACCOUNT NUMBER" value={accNum} onChange={e => setAccNum(e.target.value)} />
                            <input required type="number" className="w-full px-5 py-3 rounded-xl border border-slate-200 font-black font-mono text-xs text-indigo-600" placeholder="INITIAL BALANCE" value={accBal} onChange={e => setAccBal(e.target.value)} />
-                           <button type="submit" className="w-full bg-indigo-600 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[9px] shadow-lg hover:bg-indigo-700 transition-all">Add To Ledger</button>
+                           <button type="submit" className={`w-full ${editingAccount ? 'bg-indigo-900' : 'bg-indigo-600'} text-white font-black py-4 rounded-xl uppercase tracking-widest text-[9px] shadow-lg hover:opacity-90 transition-all`}>
+                               {editingAccount ? 'Update Core Ledger' : 'Add To Ledger'}
+                           </button>
                         </form>
                         <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
                            <p className="text-[9px] font-black text-indigo-600 uppercase leading-relaxed text-center">Linked accounts will appear in all payment source menus across the terminal.</p>

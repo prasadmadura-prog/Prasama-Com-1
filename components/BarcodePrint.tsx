@@ -103,6 +103,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           .grid {
             display: grid;
             grid-template-columns: repeat(${settings.columns}, 1fr);
+            align-content: start;
             gap: 2mm;
             width: ${currentPaper.width};
             margin: 0 auto;
@@ -112,7 +113,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
             border-radius: 0;
             width: 100%;
             max-width: ${labelDim.w};
-            height: ${labelDim.h};
+            min-height: ${labelDim.h};
+            height: auto;
             display: flex;
             flex-direction: column;
             align-items: center;

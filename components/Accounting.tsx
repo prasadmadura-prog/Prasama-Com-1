@@ -10,10 +10,11 @@ interface AccountingProps {
     products: Product[];
     categories: Category[];
     purchaseOrders: PurchaseOrder[];
+    fixedAssets: FixedAsset[];
     userProfile: UserProfile;
 }
 
-const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders, userProfile }) => {
+const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders, fixedAssets = [], userProfile }) => {
     const [activeReport, setActiveReport] = useState<'BALANCE_SHEET' | 'INCOME_STATEMENT' | 'CATEGORY_REPORT' | 'CRITICAL_STOCK' | 'DAILY_SUMMARY'>('BALANCE_SHEET');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -93,7 +94,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 return po.items.some(item => {
                     const product = products.find(p => p.id === item.productId);
                     const category = product?.categoryId ? categories.find(c => c.id === product.categoryId) : undefined;
-                    return isReloadItem(item, product, category, '');
+                    return isHotReloadItem(item, product, category, '');
                 });
             }
         }
@@ -108,7 +109,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const cashAndBank = accounts.reduce((sum, acc) => sum + Number(acc.balance || 0), 0);
         const accountsReceivable = customers.reduce((sum, c) => sum + Number(c.totalCredit || 0), 0);
         const inventory = products.reduce((sum, p) => sum + (Number(p.stock || 0) * Number(p.cost || 0)), 0);
-        const totalAssets = cashAndBank + accountsReceivable + inventory;
+        const fixedAssetsTotal = fixedAssets.reduce((sum, fa) => sum + Number(fa.currentValue || 0), 0);
+        const totalAssets = cashAndBank + accountsReceivable + inventory + fixedAssetsTotal;
 
         // LIABILITIES
         const accountsPayable = vendors.reduce((sum, v) => sum + Number(v.totalBalance || 0), 0);
@@ -122,6 +124,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 cashAndBank,
                 accountsReceivable,
                 inventory,
+                fixedAssets: fixedAssetsTotal,
                 total: totalAssets
             },
             liabilities: {
@@ -132,7 +135,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 total: totalEquity
             }
         };
-    }, [accounts, customers, vendors, products]);
+    }, [accounts, customers, vendors, products, fixedAssets]);
 
     // Income Statement Calculations
     const incomeStatement = useMemo(() => {
@@ -607,6 +610,11 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                                     <td className="py-3 text-sm font-bold text-slate-700">Inventory Stock Assets (At Cost)</td>
                                     <td className="py-3 text-center text-[10px] font-black text-slate-400">03</td>
                                     <td className="py-3 text-right font-black font-mono text-slate-900">{Math.round(balanceSheet.assets.inventory).toLocaleString()}</td>
+                                </tr>
+                                <tr className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                                    <td className="py-3 text-sm font-bold text-slate-700">Fixed Assets (Plant, Equipment & Furniture)</td>
+                                    <td className="py-3 text-center text-[10px] font-black text-slate-400">04</td>
+                                    <td className="py-3 text-right font-black font-mono text-slate-900">{Math.round(balanceSheet.assets.fixedAssets).toLocaleString()}</td>
                                 </tr>
                                 <tr className="bg-slate-100/50">
                                     <td className="py-4 text-sm font-black text-slate-900 uppercase tracking-wider">Total assets</td>

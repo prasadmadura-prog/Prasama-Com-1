@@ -11,6 +11,7 @@ interface DashboardProps {
   customers: Customer[];
   purchaseOrders?: PurchaseOrder[];
   daySessions?: DaySession[];
+  fixedAssets?: FixedAsset[];
   userProfile: UserProfile;
   onNavigate: (view: View) => void;
   onUpdateProduct: (p: Product) => void;
@@ -26,6 +27,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   customers = [],
   vendors = [],
   purchaseOrders = [],
+  fixedAssets = [],
   userProfile,
   onNavigate,
   onUpdateProduct,
@@ -151,8 +153,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       .filter(t => t.type === 'EXPENSE' || t.type === 'PURCHASE')
       .reduce((acc, t) => acc + Number(t.amount || 0), 0);
 
-    return { revenue: effectiveRevenue, profit, todayCash, burn, totalStockValue, margin };
-  }, [transactions, products, categories, daySessions, branchFilter]);
+    const fixedAssetValuation = fixedAssets.reduce((sum, fa) => sum + Number(fa.currentValue || 0), 0);
+
+    return {
+      revenue: effectiveRevenue,
+      reloadSales,
+      profit,
+      margin,
+      todayCash,
+      burn,
+      totalStockValue,
+      fixedAssetValuation
+    };
+  }, [transactions, products, categories, accounts, purchaseOrders, vendors, customers, daySessions, fixedAssets, branchFilter]);
 
   const salesTrend = useMemo(() => {
     // 1. Setup Buckets (Last 30 Days)
@@ -442,6 +455,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               className="bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm outline-none text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:border-indigo-200 transition-all cursor-pointer"
             >
               {userProfile.isAdmin && <option value="ALL">All Terminals</option>}
+              {userProfile.allBranches
                 .filter(b => {
                   if (!userProfile.isAdmin && userProfile.branch === 'CASHIER 2' && b === 'CASHIER 1') return false;
                   return true;
@@ -459,12 +473,13 @@ const Dashboard: React.FC<DashboardProps> = ({
       </header>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         {[
           { label: "Today's Revenue", value: stats.revenue, color: 'text-indigo-600', icon: '💰', sub: 'Gross Daily' },
           { label: "Today's Profit", value: stats.profit, color: 'text-emerald-600', icon: '📈', sub: `Margin: ${stats.margin.toFixed(1)}%` },
           { label: "Cash Position", value: stats.todayCash, color: 'text-slate-900', icon: '💵', sub: 'In-Drawer Float' },
-          { label: "Asset Valuation", value: stats.totalStockValue, color: 'text-amber-600', icon: '📦', sub: 'Inventory at Cost' },
+          { label: "Inventory Value", value: stats.totalStockValue, color: 'text-amber-600', icon: '📦', sub: 'Stock at Cost' },
+          { label: "Fixed Assets", value: stats.fixedAssetValuation, color: 'text-blue-600', icon: '🏢', sub: 'Infrastructure Value' },
           { label: "Capital Outflow", value: stats.burn, color: 'text-rose-600', icon: '💸', sub: 'Expenses + Purchases' },
         ].map((item, idx) => (
           <div key={idx} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all duration-500 group">

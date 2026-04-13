@@ -121,18 +121,19 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     return b;
   };
 
-  // Helper to identify a reload item robustly
-  const isReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
+  // Helper to identify a hot reload item robustly (Digital only, excludes RELOAD CARD)
+  const isHotReloadItem = (item: any, product: Product | undefined, category: Category | undefined, txDescription: string = '') => {
     const pName = (product?.name || "").toUpperCase();
     const cName = (category?.name || "").toUpperCase();
     const pId = (item.productId || "").toUpperCase();
     const desc = txDescription.toUpperCase();
 
+    if (cName.includes('CARD')) return false;
+
     return cName.includes('RELOAD') ||
       pName.includes('RELOAD') ||
       pId.includes('RELOAD') ||
       desc.includes('RELOAD') ||
-      // Also check provider names if not explicitly labeled reload
       pName.includes('DIALOG') || pName.includes('MOBITEL') || pName.includes('AIRTEL') || pName.includes('HUTCH') ||
       cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
   };
@@ -153,7 +154,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const category = categories.find(c => c.id === product?.categoryId);
       const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
-      if (isReloadItem(item, product, category, tx.description)) {
+      if (isHotReloadItem(item, product, category, tx.description)) {
         return acc + (lineTotal * 0.04);
       } else {
         const cost = (Number(product?.cost || 0) * Number(item.quantity));
@@ -661,24 +662,6 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     // Profit = (NonReload Revenue - NonReload Cost) + 4% of reload sales - totalExpenses
     const reloadProfit = reloadSales * 0.04;
     const profit = (revenueExcludingReload - costOfRevenue) + reloadProfit - totalExpenses;
-
-    const reloadSales = rangeEntries
-      .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
-      .reduce((acc, t) => {
-        if (!t.items) {
-          const desc = (t.description || '').toUpperCase();
-          const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
-          return isReload ? acc + Number(t.amount || 0) : acc;
-        }
-        return acc + t.items.reduce((itemAcc, item) => {
-          const product = products.find(p => p.id === item.productId);
-          const category = categories.find(c => c.id === product?.categoryId);
-          if (isReloadItem(item, product, category, t.description)) {
-            return itemAcc + (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
-          }
-          return itemAcc;
-        }, 0);
-      }, 0);
 
     // Net Revenue = Total Sales - Total Purchases
     const netRevenue = totalRevenue - totalPurchases;

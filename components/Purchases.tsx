@@ -270,12 +270,21 @@ const Purchases: React.FC<PurchasesProps> = ({
     if (!selectedVendor) return [];
     return purchaseOrders.filter(po => {
       if (po.vendorId !== selectedVendor.id) return false;
+      // ONLY show RECEIVED orders for settlement. PENDING (ordered but not yet here) are not liabilities yet.
+      if (po.status !== 'RECEIVED') return false;
+      
       const linkedPayments = transactions
         .filter(t => t.vendorId === po.vendorId && (t.description?.includes(po.id) || t.id.includes(po.id)))
         .filter(t => t.type === 'CREDIT_PAYMENT' || (t.type === 'PURCHASE' && t.paymentMethod !== 'CREDIT'));
       const totalPaid = linkedPayments.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
       return Number(po.totalAmount) - totalPaid > 0.01;
-    });
+    }).map(po => {
+      const linkedPayments = transactions
+        .filter(t => t.vendorId === po.vendorId && (t.description?.includes(po.id) || t.id.includes(po.id)))
+        .filter(t => t.type === 'CREDIT_PAYMENT' || (t.type === 'PURCHASE' && t.paymentMethod !== 'CREDIT'));
+      const totalPaid = linkedPayments.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+      return { ...po, remainingBalance: Number(po.totalAmount) - totalPaid };
+    }).sort((a, b) => b.date.localeCompare(a.date));
   }, [selectedVendor, purchaseOrders, transactions]);
 
   const vendorLedgerData = useMemo(() => {
@@ -478,8 +487,8 @@ const Purchases: React.FC<PurchasesProps> = ({
       const newList = has ? prev.filter(x => x !== id) : [...prev, id];
 
       const newAmount = newList.reduce((sum, poId) => {
-        const po = purchaseOrders.find(x => x.id === poId);
-        return sum + (po?.totalAmount || 0);
+        const po = outstandingInvoices.find(x => x.id === poId);
+        return sum + (Number((po as any)?.remainingBalance) || 0);
       }, 0);
       setSettlementAmount(newAmount.toString());
 
@@ -1686,7 +1695,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 border-b border-slate-100 pb-2">Outstanding Invoices</h4>
                   <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                     {outstandingInvoices.length > 0 ? outstandingInvoices.map(po => (
-                      <div key={po.id} className="bg-white p-4 rounded-xl border border-slate-100 hover:border-indigo-100 transition-all flex items-center gap-4 group cursor-pointer" onClick={() => toggleInvoiceSelection(po.id, po.totalAmount)}>
+                      <div key={po.id} className="bg-white p-4 rounded-xl border border-slate-100 hover:border-indigo-100 transition-all flex items-center gap-4 group cursor-pointer" onClick={() => toggleInvoiceSelection(po.id, (po as any).remainingBalance || po.totalAmount)}>
                         <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${selectedInvoices.includes(po.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white group-hover:border-indigo-400'}`}>
                           {selectedInvoices.includes(po.id) && <span className="text-[10px]">✓</span>}
                         </div>
@@ -1694,7 +1703,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                           <p className="text-[11px] font-black uppercase text-slate-900">{po.id}</p>
                           <p className="text-[9px] font-bold text-slate-400 mt-0.5">{po.date.split('T')[0]}</p>
                         </div>
-                        <p className="text-[11px] font-black font-mono text-slate-900">Rs. {po.totalAmount.toLocaleString()}</p>
+                        <div className="text-right">
+                           <p className="text-[11px] font-black font-mono text-slate-900">Rs. {((po as any).remainingBalance || po.totalAmount).toLocaleString()}</p>
+                           {(po as any).remainingBalance < po.totalAmount && (
+                              <p className="text-[7px] font-black text-emerald-500 uppercase">Partially Paid</p>
+                           )}
+                        </div>
                       </div>
                     )) : (
                       <div className="py-20 text-center text-slate-300 opacity-40">

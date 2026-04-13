@@ -54,6 +54,8 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
         const pId = (item.productId || "").toUpperCase();
         const desc = txDescription.toUpperCase();
 
+        if (cName.includes('CARD')) return false;
+
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||
             pId.includes('RELOAD') ||
@@ -457,6 +459,55 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                 </button>
                             );
                         })}
+                    </div>
+
+                    {/* Manual Entry Form */}
+                    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-8">
+                        <div className="flex flex-col md:flex-row gap-6 items-end">
+                            <div className="flex-1 space-y-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Phone Number / ID</label>
+                                <input
+                                    type="text"
+                                    value={phoneNumber}
+                                    onChange={e => setPhoneNumber(e.target.value)}
+                                    placeholder="Enter Customer Info..."
+                                    className="w-full bg-slate-50 border-2 border-transparent rounded-2xl px-6 py-4 text-sm font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-300"
+                                />
+                            </div>
+                            <div className="w-full md:w-64 space-y-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Amount (LKR)</label>
+                                <div className="relative">
+                                    <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">Rs.</span>
+                                    <input
+                                        type="number"
+                                        value={amount}
+                                        onChange={e => setAmount(e.target.value)}
+                                        placeholder="0.00"
+                                        className="w-full bg-slate-50 border-2 border-transparent rounded-2xl pl-12 pr-6 py-4 text-sm font-black font-mono outline-none focus:ring-2 ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-300"
+                                    />
+                                </div>
+                            </div>
+                            <div className="w-full md:w-48 space-y-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Account</label>
+                                <select
+                                    value={reloadCustomerId}
+                                    onChange={e => setReloadCustomerId(e.target.value)}
+                                    className="w-full bg-slate-50 border-2 border-transparent rounded-2xl px-6 py-4 text-xs font-bold uppercase tracking-widest outline-none focus:ring-2 ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                                >
+                                    <option value="WALKING">WALKING CUSTOMER</option>
+                                    {customers.map(c => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <button
+                                onClick={handleProcessReload}
+                                disabled={isProcessing || !amount || !provider}
+                                className={`px-10 py-4 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] transition-all shadow-xl active:scale-95 ${isProcessing ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-black hover:shadow-indigo-100 hover:-translate-y-0.5'}`}
+                            >
+                                {isProcessing ? 'Processing...' : 'Authorize Top-up'}
+                            </button>
+                        </div>
                     </div>
 
                     {/* Revenue & Profit Chart */}
