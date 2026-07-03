@@ -18,6 +18,7 @@ interface PrintSettings {
   showName: boolean;
   showNotes: boolean;
   paperSize: PaperSize;
+  cashierSuffix: 'NONE' | 'CASHIER 1' | 'CASHIER 2' | 'CASHIER 3' | 'CASHIER 4';
 }
 
 const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories = [] }) => {
@@ -32,7 +33,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
     showSKU: true,
     showName: true,
     showNotes: true,
-    paperSize: 'A4'
+    paperSize: 'A4',
+    cashierSuffix: 'NONE'
   });
 
   const holdTimerRef = useRef<number | null>(null);
@@ -186,32 +188,41 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
 
     itemsToPrint.forEach(p => {
       const count = selections[p.id];
-      const isNumeric = /^\d+$/.test(p.sku);
-      const isEAN = p.sku.length === 13 && isNumeric;
-      const isUPC = p.sku.length === 12 && isNumeric;
+      
+      let barcodeValue = p.sku || '0000';
+      if (settings.cashierSuffix === 'CASHIER 1') barcodeValue += '200';
+      else if (settings.cashierSuffix === 'CASHIER 2') barcodeValue += '300';
+      else if (settings.cashierSuffix === 'CASHIER 3') barcodeValue += '400';
+      else if (settings.cashierSuffix === 'CASHIER 4') barcodeValue += '500';
+
+      const isNumeric = /^\d+$/.test(barcodeValue);
+      const isEAN = barcodeValue.length === 13 && isNumeric;
+      const isUPC = barcodeValue.length === 12 && isNumeric;
       const format = isEAN ? 'EAN13' : (isUPC ? 'UPC' : 'CODE128');
 
-      for (let i = 0; i < count; i++) {
-        html += `<div class="label">
-          ${settings.showName ? `<div class="name">${p.name}</div>` : ''}
-          <div style="flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; overflow: hidden;">
-            <svg class="barcode-svg" 
-              data-value="${p.sku || '0000'}" 
-              data-format="${format}"
-              data-bh="${labelDim.bh}"
-              data-bw="${labelDim.bw}"
-              data-fs="${settings.labelSize === 'SMALL' ? '12' : '22'}"
-              data-disp="${settings.showSKU}"
-              data-margin="${format === 'CODE128' ? '0' : '8'}"
-            ></svg>
-          </div>
-          <div class="footer">
-            ${settings.showPrice ? `<div class="price">Rs. ${Number(p.price || 0).toLocaleString()}</div>` : ''}
-            ${settings.showNotes && p.internalNotes ? `<div class="notes-footer">${p.internalNotes}</div>` : ''}
-            <div class="company-name">Prasama(Pvt)Ltd</div>
-          </div>
-        </div>`;
-      }
+        for (let i = 0; i < count; i++) {
+          html += `<div class="label">
+            <div class="footer" style="margin-bottom: 1mm;">
+              ${settings.showNotes && p.internalNotes ? `<div class="notes-footer" style="text-align: left; padding: 0; flex: 1;">${p.internalNotes}</div>` : '<div style="flex: 1;"></div>'}
+              <div class="company-name" style="margin-top: 0;">Prasama(Pvt)Ltd</div>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; overflow: hidden;">
+              <svg class="barcode-svg" 
+                data-value="${barcodeValue}" 
+                data-format="${format}"
+                data-bh="${labelDim.bh}"
+                data-bw="${labelDim.bw}"
+                data-fs="${settings.labelSize === 'SMALL' ? '12' : '22'}"
+                data-disp="${settings.showSKU}"
+                data-margin="${format === 'CODE128' ? '0' : '8'}"
+              ></svg>
+            </div>
+            <div class="footer" style="margin-top: 1mm;">
+              ${settings.showPrice ? `<div class="price">Rs. ${Number(p.price || 0).toLocaleString()}</div>` : ''}
+              ${settings.showName ? `<div class="name" style="margin-bottom: 0; text-align: right; flex: 1; margin-left: 2mm;">${p.name}</div>` : ''}
+            </div>
+          </div>`;
+        }
     });
 
     html += `
@@ -331,6 +342,31 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                     {s}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Cashier Suffix</label>
+              <div className="grid grid-cols-5 gap-1.5">
+                {(['NONE', 'CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'] as const).map(c => {
+                  const labels = {
+                    NONE: 'NONE',
+                    'CASHIER 1': 'C1 (200)',
+                    'CASHIER 2': 'C2 (300)',
+                    'CASHIER 3': 'C3 (400)',
+                    'CASHIER 4': 'C4 (500)'
+                  };
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setSettings({ ...settings, cashierSuffix: c })}
+                      className={`py-2 rounded-lg text-[8px] font-black uppercase transition-all border ${settings.cashierSuffix === c ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300'}`}
+                    >
+                      {labels[c]}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

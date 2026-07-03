@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction, Product, Customer, UserProfile, BankAccount, DaySession, Category } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { getBackendURL } from '../services/config';
-import { formatDateTime, formatDate } from '../utils/dateFormatter';
+import { formatDateTime, formatDate, formatTime } from '../utils/dateFormatter';
 import * as XLSX from 'xlsx';
 
 interface SalesHistoryProps {
@@ -129,6 +129,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const desc = txDescription.toUpperCase();
 
     if (cName.includes('CARD')) return false;
+    if (pName.includes('SIM') || cName.includes('SIM') || desc.includes('SIM')) return false;
 
     return cName.includes('RELOAD') ||
       pName.includes('RELOAD') ||
@@ -138,13 +139,30 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
   };
 
+  // Date-aware Mobitel commission rate: 6% from 2026-04-28, else 4%
+  const getMobitelAwareRate = (desc: string, productName: string, categoryName: string, txDate?: string) => {
+    const d = desc.toUpperCase();
+    const p = productName.toUpperCase();
+    const c = categoryName.toUpperCase();
+    const isMobitel = d.includes('MOBITEL') || p.includes('MOBITEL') || c.includes('MOBITEL');
+    if (isMobitel) {
+      const dateStr = txDate ? txDate.split('T')[0] : '0000-00-00';
+      return dateStr >= '2026-04-28' ? 0.06 : 0.04;
+    }
+    return 0.04;
+  };
+
   const calculateTransactionProfit = (tx: Transaction) => {
     // If no items, check description for reload tag to avoid 100% profit misclassification
     if ((tx.type !== 'SALE' && tx.type !== 'SALE_HISTORY_IMPORT') || !tx.items || tx.items.length === 0) {
       if (tx.type === 'SALE' || tx.type === 'SALE_HISTORY_IMPORT') {
         const desc = (tx.description || '').toUpperCase();
         const isReload = desc.includes('RELOAD') || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
-        return isReload ? Number(tx.amount || 0) * 0.04 : Number(tx.amount || 0);
+        if (isReload) {
+          const rate = getMobitelAwareRate(tx.description || '', '', '', tx.date);
+          return Number(tx.amount || 0) * rate;
+        }
+        return Number(tx.amount || 0);
       }
       return 0;
     }
@@ -155,7 +173,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
       if (isHotReloadItem(item, product, category, tx.description)) {
-        return acc + (lineTotal * 0.04);
+        const rate = getMobitelAwareRate(tx.description || '', product?.name || '', category?.name || '', tx.date);
+        return acc + (lineTotal * rate);
       } else {
         const cost = (Number(product?.cost || 0) * Number(item.quantity));
         return acc + (lineTotal - cost);
@@ -431,9 +450,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const txType = tx.status === 'DRAFT' ? 'DRAFT SALE' : tx.type;
 
       // Base transaction info for all rows
+      const d = new Date(tx.date);
       const baseInfo = {
         'REFERENCE ID': tx.id,
         'DATE & TIME': formatDateTime(tx.date),
+        'DAY': d.getDate(),
+        'MONTH #': d.getMonth() + 1,
+        'YEAR #': d.getFullYear(),
+        'DATE': '', // Placeholder for formula
+        'TIME': formatTime(tx.date),
         'TYPE': txType,
         'CUSTOMER': customerName,
         'TERMINAL': terminal,
@@ -492,13 +517,34 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     });
 
     const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // Inject Excel DATE formula into Column F (Index 5)
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      const dateCellAddress = XLSX.utils.encode_cell({ r: R, c: 5 }); // Column F
+      const dayCell = XLSX.utils.encode_cell({ r: R, c: 2 }); // Column C
+      const monthCell = XLSX.utils.encode_cell({ r: R, c: 3 }); // Column D
+      const yearCell = XLSX.utils.encode_cell({ r: R, c: 4 }); // Column E
+      
+      worksheet[dateCellAddress] = {
+        t: 'n',
+        f: `DATE(${yearCell},${monthCell},${dayCell})`,
+        z: 'm/d/yyyy'
+      };
+    }
+
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Details");
 
     // Format column widths for better readability
     const widths = [
-      { wch: 22 }, // Ref ID
-      { wch: 20 }, // Date
+      { wch: 22 }, // Ref ID (A)
+      { wch: 20 }, // Date & Time (B)
+      { wch: 8 },  // Day (C)
+      { wch: 8 },  // Month # (D)
+      { wch: 8 },  // Year # (E)
+      { wch: 12 }, // Date (F)
+      { wch: 10 }, // Time (G)
       { wch: 15 }, // Type
       { wch: 25 }, // Customer
       { wch: 12 }, // Terminal
@@ -539,8 +585,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const sBranch = normalizeBranch(s.branchId);
       const targetFilter = normalizeBranch(cashierFilter);
       const matchesCashier = cashierFilter === 'ALL' || sBranch === targetFilter;
+      const isValidStatus = s.status !== 'DRAFT' && s.status !== 'VOID';
 
-      return matchesDate && matchesCashier;
+      return matchesDate && matchesCashier && isValidStatus;
     });
 
     const rangeOpeningBalance = (daySessions || []).filter(s => {
@@ -597,7 +644,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         return acc + nonReloadAmount;
       }, 0);
 
-    // FIX: Total Revenue should be Non-Reload Revenue + 4% of Reload Sales (Matching POS "Inflow" & Dashboard)
+    // FIX: Total Revenue should be Non-Reload Revenue + commission% of Reload Sales (Matching POS "Inflow" & Dashboard)
+    // Note: Mobitel uses 6% from 2026-04-28; for aggregate we use per-tx rate in profit but apply avg 4% to revenue display
     const totalRevenue = revenueExcludingReload + (reloadSales * 0.04);
 
     const realizedInflow = rangeEntries
@@ -659,8 +707,27 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
     const totalPurchases = manualPurchases + poPurchases;
 
-    // Profit = (NonReload Revenue - NonReload Cost) + 4% of reload sales - totalExpenses
-    const reloadProfit = reloadSales * 0.04;
+    // Profit = (NonReload Revenue - NonReload Cost) + commission% of reload sales - totalExpenses
+    // Calculate reload profit per-transaction to apply correct Mobitel rate (6% from 2026-04-28)
+    const reloadProfit = rangeEntries
+      .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
+      .reduce((acc, t) => {
+        if (!t.items) {
+          const desc = (t.description || '').toUpperCase();
+          const isReload = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          if (!isReload) return acc;
+          const rate = getMobitelAwareRate(t.description || '', '', '', t.date);
+          return acc + Number(t.amount || 0) * rate;
+        }
+        return acc + t.items.reduce((itemAcc, item) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          if (!isHotReloadItem(item, product, category, t.description)) return itemAcc;
+          const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+          const rate = getMobitelAwareRate(t.description || '', product?.name || '', category?.name || '', t.date);
+          return itemAcc + lineTotal * rate;
+        }, 0);
+      }, 0);
     const profit = (revenueExcludingReload - costOfRevenue) + reloadProfit - totalExpenses;
 
     // Net Revenue = Total Sales - Total Purchases
@@ -692,7 +759,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     }> = {
       'CASHIER 1': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
       'CASHIER 2': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
-      'CASHIER 3': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 }
+      'CASHIER 3': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 },
+      'CASHIER 4': { revenue: 0, profit: 0, count: 0, reloadRevenue: 0, reloadProfit: 0, retailRevenue: 0, retailProfit: 0 }
     };
 
     rangeEntries.filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT').forEach(s => {
@@ -714,7 +782,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
           if (isHotReloadItem(item, product, category, s.description)) {
             txReloadRevenue += lineTotal;
-            txReloadProfit += (lineTotal * 0.04);
+            const rate = getMobitelAwareRate(s.description || '', product?.name || '', category?.name || '', s.date);
+            txReloadProfit += (lineTotal * rate);
           } else {
             const cost = (Number(product?.cost || 0) * Number(item.quantity));
             txRetailRevenue += lineTotal;
@@ -726,7 +795,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         const isHot = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
         if (isHot) {
           txReloadRevenue = Number(s.amount || 0);
-          txReloadProfit = txReloadRevenue * 0.04;
+          const rate = getMobitelAwareRate(s.description || '', '', '', s.date);
+          txReloadProfit = txReloadRevenue * rate;
         } else {
           txRetailRevenue = Number(s.amount || 0);
           txRetailProfit = Number(s.amount || 0); 
@@ -779,7 +849,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="flex flex-col items-center">
               <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-4">Reload Sales</p>
               <div className="flex justify-between w-full gap-4">
-                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3'].map(branch => (
+                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].map(branch => (
                   <div key={branch} className="flex-1 text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
                     <p className="text-xl font-black text-rose-600 font-mono tracking-tighter mb-2">
@@ -798,7 +868,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             <div className="flex flex-col items-center">
               <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-4">Retail Sales</p>
               <div className="flex justify-between w-full gap-4">
-                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3'].map(branch => (
+                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].map(branch => (
                   <div key={branch} className="flex-1 text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
                     <p className="text-xl font-black text-slate-900 font-mono tracking-tighter mb-2">
@@ -957,6 +1027,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 <option value="CASHIER 1">Cashier 1</option>
                 <option value="CASHIER 2">Cashier 2</option>
                 <option value="CASHIER 3">Cashier 3</option>
+                <option value="CASHIER 4">Cashier 4</option>
               </>
             )}
           </select>
@@ -990,7 +1061,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                         <span className="font-black text-slate-800 uppercase text-[11px] truncate tracking-tight">{description}</span>
                         <div className="flex items-center gap-2 mt-1">
                           {tx.type === 'SALE' && <span className="text-[9px] font-black text-indigo-500 uppercase tracking-wider">{customerName}</span>}
-                          <span className="text-[9px] text-slate-400 font-mono font-bold uppercase tracking-wider border-l border-slate-200 pl-2">{tx.id} | {formatDateTime(tx.date)}</span>
+                          <span className="text-[9px] text-slate-400 font-mono font-bold uppercase tracking-wider border-l border-slate-200 pl-2">{tx.id}</span>
+                          <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-black uppercase tracking-tight">{formatDate(tx.date)}</span>
+                          <span className="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-black uppercase tracking-tight">{formatTime(tx.date)}</span>
                         </div>
                         {tx.type === 'SALE' && tx.items && (
                           <div className="mt-2.5 space-y-1 border-l-2 border-indigo-50 pl-3">
@@ -1209,6 +1282,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                           <option value="CASHIER 1">CASHIER 1</option>
                           <option value="CASHIER 2">CASHIER 2</option>
                           <option value="CASHIER 3">CASHIER 3</option>
+                          <option value="CASHIER 4">CASHIER 4</option>
                         </>
                       )}
                   </select>

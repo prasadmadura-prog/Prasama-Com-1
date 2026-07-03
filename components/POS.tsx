@@ -46,6 +46,33 @@ const POS: React.FC<POSProps> = ({
   const [lastTx, setLastTx] = useState<any>(null);
   const [activeTerminal, setActiveTerminal] = useState(userProfile.branch || 'CASHIER 1'); // State for active terminal
 
+  const getProductBySkuOrId = (term: string) => {
+    const trimmed = term.trim();
+    // 1. Try exact match first
+    let product = products.find(p => p.sku === trimmed || p.id === trimmed);
+    let detectedBranch: string | null = null;
+
+    // 2. If no exact match and term is longer than 3 characters, check for cashier suffix
+    if (!product && trimmed.length > 3) {
+      const suffix = trimmed.slice(-3);
+      const baseSku = trimmed.slice(0, -3);
+      
+      let matchedBranch: string | null = null;
+      if (suffix === '200') matchedBranch = 'CASHIER 1';
+      else if (suffix === '300') matchedBranch = 'CASHIER 2';
+      else if (suffix === '400') matchedBranch = 'CASHIER 3';
+      else if (suffix === '500') matchedBranch = 'CASHIER 4';
+
+      if (matchedBranch) {
+        product = products.find(p => p.sku === baseSku);
+        if (product) {
+          detectedBranch = matchedBranch;
+        }
+      }
+    }
+    return { product, detectedBranch };
+  };
+
   const getTodayLocal = () => {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -92,10 +119,19 @@ const POS: React.FC<POSProps> = ({
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   const filteredProducts = useMemo(() => {
+    let baseSearch = search.trim();
+    if (baseSearch.length > 3) {
+      const suffix = baseSearch.slice(-3);
+      if (suffix === '200' || suffix === '300' || suffix === '400' || suffix === '500') {
+        baseSearch = baseSearch.slice(0, -3);
+      }
+    }
+
     return products.filter(p => {
       const matchesSearch = !search.trim() ||
         (p.name || "").toLowerCase().includes(search.toLowerCase()) ||
         (p.sku || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.sku || "").toLowerCase().includes(baseSearch.toLowerCase()) ||
         (p.internalNotes || "").toLowerCase().includes(search.toLowerCase());
 
       const matchesCat = !categoryId || categoryId === 'All' || p.categoryId === categoryId;
@@ -111,9 +147,9 @@ const POS: React.FC<POSProps> = ({
   const dailySummary = useMemo(() => {
     const todayEntries = (transactions || []).filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === today && t.status !== 'DRAFT' && t.status !== 'VOID');
 
-    const branchStats: Record<string, { revenue: number, profit: number }> = {
-      'CASHIER 1': { revenue: 0, profit: 0 },
-      'CASHIER 2': { revenue: 0, profit: 0 }
+    const branchStats: Record<string, { revenue: number, profit: number, retailRevenue: number, retailProfit: number }> = {
+      'CASHIER 1': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 },
+      'CASHIER 2': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 }
     };
 
     let totalReloadSales = 0;
@@ -176,6 +212,8 @@ const POS: React.FC<POSProps> = ({
       if (isSale) {
         branchStats[branch].revenue += txRevenue;
         branchStats[branch].profit += txProfit;
+        branchStats[branch].retailRevenue += (txRevenue - txReloadSales);
+        branchStats[branch].retailProfit += (txProfit - (txReloadSales * 0.04));
         totalReloadSales += txReloadSales;
         globalProfit += txProfit; // This matches sum of branch profits
       }
@@ -243,8 +281,15 @@ const POS: React.FC<POSProps> = ({
     holdIntervalRef.current = null;
   };
 
+  const getAvailableStock = (product: Product) => {
+    return product.branchStocks && product.branchStocks[activeTerminal] !== undefined
+      ? Number(product.branchStocks[activeTerminal])
+      : Number(product.stock || 0);
+  };
+
   const addToCart = (product: Product) => {
-    if (!isDayOpen || product.stock <= 0) return;
+    const availableStock = getAvailableStock(product);
+    if (!isDayOpen || availableStock <= 0) return;
 
     setPosSession((prev: POSSession) => {
       // Generate transaction ID ONLY when cart is empty (new transaction starting)
@@ -255,7 +300,7 @@ const POS: React.FC<POSProps> = ({
 
       const existing = prev.cart.find((item: any) => item.product.id === product.id);
       if (existing) {
-        return { ...prev, cart: prev.cart.map((item: any) => item.product.id === product.id ? { ...item, qty: Math.min(item.qty + 1, product.stock) } : item) };
+        return { ...prev, cart: prev.cart.map((item: any) => item.product.id === product.id ? { ...item, qty: Math.min(item.qty + 1, availableStock) } : item) };
       }
       return { ...prev, cart: [{ product, qty: 1, price: product.price, discount: 0, discountType: 'AMT' }, ...prev.cart] };
     });
@@ -268,7 +313,13 @@ const POS: React.FC<POSProps> = ({
       }
       return {
         ...prev,
-        cart: prev.cart.map((item: any) => item.product.id === id ? { ...item, qty: Math.min(newQty, item.product.stock) } : item)
+        cart: prev.cart.map((item: any) => {
+          if (item.product.id === id) {
+            const availableStock = getAvailableStock(item.product);
+            return { ...item, qty: Math.min(newQty, availableStock) };
+          }
+          return item;
+        })
       };
     });
   };
@@ -338,8 +389,11 @@ const POS: React.FC<POSProps> = ({
   };
 
   const handleScan = (decodedText: string) => {
-    const product = products.find(p => p.sku === decodedText || p.id === decodedText);
+    const { product, detectedBranch } = getProductBySkuOrId(decodedText);
     if (product) {
+      if (detectedBranch) {
+        setActiveTerminal(detectedBranch);
+      }
       addToCart(product);
       setShowScanner(false);
     }
@@ -631,7 +685,66 @@ const POS: React.FC<POSProps> = ({
     const customer = customers.find(c => c.id === tx.customerId);
     const phone = customer?.phone || '';
     const bizName = userProfile.companyName || userProfile.name;
-    const message = `Hello ${customer?.name || 'Customer'},\n\nThank you for shopping at ${bizName}!\n\nInvoice: ${tx.id}\nDate: ${formatDate(tx.date)}\nTotal: Rs. ${Number(tx.amount).toLocaleString()}\n\nVisit us again!`;
+    
+    // Formatting helpers for monospace receipt
+    const width = 34;
+    const padR = (str: string | number, len: number) => String(str).padStart(len, ' ');
+    const padL = (str: string | number, len: number) => String(str).padEnd(len, ' ');
+    const center = (str: string, len: number) => {
+        const s = String(str);
+        if (s.length >= len) return s;
+        return s.padStart(Math.floor((len + s.length) / 2), ' ').padEnd(len, ' ');
+    };
+    const dashes = '-'.repeat(width);
+
+    let itemsStr = padL('ITEM', 12) + padR('QTY', 4) + padR('RATE', 6) + padR('DISC', 5) + padR('AMT', 7) + '\n';
+    tx.items?.forEach((item: any) => {
+      const product = products.find(p => p.id === item.productId);
+      const name = (product?.name || 'Item').toUpperCase();
+      const qty = item.quantity;
+      const rate = Number(item.price);
+      const disc = Number(item.discount || 0);
+      const amt = (qty * rate) - disc;
+
+      if (name.length <= 11) {
+          itemsStr += padL(name, 12) + padR(qty, 4) + padR(rate, 6) + padR('-'+disc, 5) + padR(amt, 7) + '\n';
+      } else {
+          itemsStr += name + '\n';
+          itemsStr += padL('', 12) + padR(qty, 4) + padR(rate, 6) + padR('-'+disc, 5) + padR(amt, 7) + '\n';
+      }
+    });
+
+    const timeStr = new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const grossTotalValue = Number(tx.amount) + Number(tx.discount);
+
+    // Build the Monospace Receipt
+    const whatsappMessage = `\`\`\`
+${center(bizName.toUpperCase(), width)}
+${center((userProfile.companyAddress || '').toUpperCase(), width)}
+${center('CASHIER 1', width)}
+${center('PH: ' + (userProfile.phone || ''), width)}
+${dashes}
+REF: ${tx.id}
+DATE: ${formatDate(tx.date)} | TIME: ${timeStr}
+CUSTOMER: ${customer?.name || 'Walking Customer'}
+${dashes}
+${itemsStr.trimEnd()}
+${dashes}
+SUBTOTAL:${padR(grossTotalValue.toFixed(2), width - 9)}
+${dashes}
+NET TOTAL:${padR(Number(tx.amount).toFixed(2), width - 10)}
+${dashes}
+PAID BY: ${tx.paymentMethod.toUpperCase()}
+
+* The advance payment for artworks is non-refundable.
+* Payments made for printouts or photocopies are non-refundable.
+* Exchanges are accepted on the same day only. No refunds will be provided.
+${dashes}
+${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
+
+    const smsMessage = `Hello ${customer?.name || 'Customer'},\n\nThank you for shopping at ${bizName}!\n\nInvoice: ${tx.id}\nDate: ${formatDate(tx.date)}\nTotal: Rs. ${Number(tx.amount).toLocaleString()}\n\nVisit us again!`;
+
+    const message = platform === 'WHATSAPP' ? whatsappMessage : smsMessage;
     const encodedMsg = encodeURIComponent(message);
 
     if (platform === 'SMS') {
@@ -708,10 +821,13 @@ const POS: React.FC<POSProps> = ({
                   const term = e.currentTarget.value.trim();
                   if (!term) return;
 
-                  // Priority 1: Exact SKU/ID Match (Fastest & Safest for Barcodes)
-                  const exactMatch = products.find(p => p.sku === term || p.id === term);
-                  if (exactMatch) {
-                    addToCart(exactMatch);
+                  // Priority 1: Exact SKU/ID Match or Cashier Suffix SKU Match
+                  const { product, detectedBranch } = getProductBySkuOrId(term);
+                  if (product) {
+                    if (detectedBranch) {
+                      setActiveTerminal(detectedBranch);
+                    }
+                    addToCart(product);
                     setPosSession(prev => ({ ...prev, search: '' }));
                     return;
                   }
@@ -777,12 +893,13 @@ const POS: React.FC<POSProps> = ({
           {(userProfile.isAdmin || userProfile.branch !== 'CASHIER 2') && (
             <>
               <div className="text-right flex flex-col items-end justify-center h-full">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Cashier 1</p>
-                <p className="text-lg font-black font-mono text-slate-800 leading-none mb-0.5">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.revenue || 0).toLocaleString()}</p>
-                <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                  <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">Profit</span>
-                  <span className="text-[9px] font-black font-mono text-slate-600 leading-none">Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.profit || 0).toLocaleString()}</span>
-                </div>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">
+                  CASHIER 1 (Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.retailRevenue || 0).toLocaleString()})
+                </p>
+                <p className="text-lg font-black font-mono text-emerald-600 leading-none mb-0.5">
+                  Rs. {Math.round(dailySummary.branchStats['CASHIER 1']?.retailProfit || 0).toLocaleString()}
+                </p>
+                <p className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">Net Profit</p>
               </div>
               <div className="w-px h-8 bg-slate-100"></div>
             </>
@@ -790,12 +907,13 @@ const POS: React.FC<POSProps> = ({
 
           {/* CASHIER 2 */}
           <div className="text-right flex flex-col items-end justify-center h-full">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Cashier 2</p>
-            <p className="text-lg font-black font-mono text-slate-800 leading-none mb-0.5">Rs. {Math.round(dailySummary.branchStats['CASHIER 2']?.revenue || 0).toLocaleString()}</p>
-            <div className="flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-              <span className="text-[7px] font-black text-slate-500 uppercase tracking-tight">Profit</span>
-              <span className="text-[9px] font-black font-mono text-slate-600 leading-none">Rs. {Math.round(dailySummary.branchStats['CASHIER 2']?.profit || 0).toLocaleString()}</span>
-            </div>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">
+              CASHIER 2 (Rs. {Math.round(dailySummary.branchStats['CASHIER 2']?.retailRevenue || 0).toLocaleString()})
+            </p>
+            <p className="text-lg font-black font-mono text-emerald-600 leading-none mb-0.5">
+              Rs. {Math.round(dailySummary.branchStats['CASHIER 2']?.retailProfit || 0).toLocaleString()}
+            </p>
+            <p className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">Net Profit</p>
           </div>
 
           {/* RELOAD SALES */}
@@ -803,12 +921,13 @@ const POS: React.FC<POSProps> = ({
             <>
               <div className="w-px h-8 bg-slate-100"></div>
               <div className="text-right flex flex-col items-end justify-center h-full">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">Reload Sales</p>
-                <p className="text-lg font-black font-mono text-rose-600 leading-none mb-0.5">Rs. {Math.round(dailySummary.reloadSales || 0).toLocaleString()}</p>
-                <div className="flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
-                  <span className="text-[7px] font-black text-emerald-600 uppercase tracking-tight">Profit</span>
-                  <span className="text-[9px] font-black font-mono text-emerald-600 leading-none">Rs. {Math.round((dailySummary.reloadSales || 0) * 0.04).toLocaleString()}</span>
-                </div>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">
+                  Reload Sales (Rs. {Math.round(dailySummary.reloadSales || 0).toLocaleString()})
+                </p>
+                <p className="text-lg font-black font-mono text-indigo-600 leading-none mb-0.5">
+                  Rs. {Math.round((dailySummary.reloadSales || 0) * 0.04).toLocaleString()}
+                </p>
+                <p className="text-[7px] font-black text-indigo-500 uppercase tracking-widest">Net Profit</p>
               </div>
             </>
           )}
@@ -821,33 +940,43 @@ const POS: React.FC<POSProps> = ({
           {/* QUICK RELOAD ACTION BAR */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 animate-in slide-in-from-top-4 shrink-0">
             {[
-              { id: 'DIALOG', color: 'bg-[#b90000] text-white border-[#b90000]', hover: 'hover:bg-[#8a0000]' },
-              { id: 'MOBITEL', color: 'bg-[#0056b3] text-white border-[#0056b3]', hover: 'hover:bg-[#004494]' },
-              { id: 'AIRTEL', color: 'bg-[#e53935] text-white border-[#e53935]', hover: 'hover:bg-[#c62828]' },
-              { id: 'HUTCH', color: 'bg-[#ff9800] text-white border-[#ff9800]', hover: 'hover:bg-[#f57c00]' }
+              { id: 'PHOTOCOPY D/S', type: 'product', color: 'bg-slate-800 text-white border-slate-800', hover: 'hover:bg-slate-700', icon: '📄', label: 'Quick Add' },
+              { id: 'MOBITEL', type: 'reload', color: 'bg-[#0056b3] text-white border-[#0056b3]', hover: 'hover:bg-[#004494]', icon: '📶', label: 'Hot Reload' },
+              { id: 'AIRTEL', type: 'reload', color: 'bg-[#e53935] text-white border-[#e53935]', hover: 'hover:bg-[#c62828]', icon: '📶', label: 'Hot Reload' },
+              { id: 'HUTCH', type: 'reload', color: 'bg-[#ff9800] text-white border-[#ff9800]', hover: 'hover:bg-[#f57c00]', icon: '📶', label: 'Hot Reload' }
             ].map(p => {
-              // Attempt to find a "Master Stock" product for this provider to show balance
-              // Matching exactly what handleQuickReload looks for: "RELOAD [PROVIDER]"
-              const targetName = `RELOAD ${p.id}`;
+              // For products, find exact name. For reloads, find 'RELOAD [PROVIDER]'
+              const isProduct = p.type === 'product';
+              const targetName = isProduct ? p.id : `RELOAD ${p.id}`;
               const masterStock = products.find(prod => prod.name === targetName);
-              const balance = masterStock ? masterStock.stock : 0;
+              const balance = masterStock ? getAvailableStock(masterStock) : 0;
 
               return (
                 <button
                   key={p.id}
-                  onClick={() => handleQuickReload(p.id)}
+                  onClick={() => {
+                    if (isProduct) {
+                      if (masterStock) {
+                        addToCart(masterStock);
+                      } else {
+                        alert(`Product ${p.id} not found in inventory.`);
+                      }
+                    } else {
+                      handleQuickReload(p.id);
+                    }
+                  }}
                   className={`${p.color} ${p.hover} border p-2 rounded-lg shadow-sm transition-all group text-left relative overflow-hidden`}
                 >
-                  <div className="absolute top-0 right-0 p-2 opacity-10 text-2xl transform rotate-12">📶</div>
+                  <div className="absolute top-0 right-0 p-2 opacity-10 text-2xl transform rotate-12">{p.icon}</div>
                   <div className="relative z-10">
                     <div className="flex justify-between items-start mb-1">
-                      <p className="text-[8px] font-black uppercase tracking-widest opacity-80">Hot Reload</p>
-                      <span className="bg-white/20 px-1 py-0.5 rounded text-[7px] font-black backdrop-blur-sm">4%</span>
+                      <p className="text-[8px] font-black uppercase tracking-widest opacity-80">{p.label}</p>
+                      {!isProduct && <span className="bg-white/20 px-1 py-0.5 rounded text-[7px] font-black backdrop-blur-sm">4%</span>}
                     </div >
                     <p className="text-sm font-black uppercase tracking-tight mb-1.5">{p.id}</p>
                     <div className="bg-black/20 rounded p-1.5 backdrop-blur-sm border border-white/10">
-                      <p className="text-[7px] font-black uppercase tracking-widest opacity-70 mb-0.5 leading-none">Bal.</p>
-                      <p className="text-[10px] font-black font-mono leading-none">Rs. {balance.toLocaleString()}</p>
+                      <p className="text-[7px] font-black uppercase tracking-widest opacity-70 mb-0.5 leading-none">{isProduct ? 'Stock' : 'Bal.'}</p>
+                      <p className="text-[10px] font-black font-mono leading-none">{isProduct ? balance : `Rs. ${balance.toLocaleString()}`}</p>
                     </div>
                   </div >
                 </button >
@@ -867,7 +996,8 @@ const POS: React.FC<POSProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredProducts.map(p => {
-                  const isLowStock = (p.stock || 0) <= (p.lowStockThreshold || 0);
+                  const availableStock = getAvailableStock(p);
+                  const isLowStock = availableStock <= (p.lowStockThreshold || 0);
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition-all group">
                       <td className="px-3 py-1 overflow-hidden leading-none">
@@ -888,14 +1018,14 @@ const POS: React.FC<POSProps> = ({
                           ? 'bg-rose-50 border-rose-100 text-rose-500'
                           : 'bg-emerald-50 border-emerald-100 text-emerald-500'
                           }`}>
-                          <span className="text-[9px] font-black font-mono leading-none">{p.stock}</span>
+                          <span className="text-[9px] font-black font-mono leading-none">{availableStock}</span>
                           <span className="text-[5px] font-black uppercase opacity-50 leading-none">U</span>
                         </div>
                       </td>
                       <td className="px-2 py-0.5 text-center">
                         <button
                           onClick={(e) => { e.stopPropagation(); addToCart(p); }}
-                          disabled={p.stock <= 0}
+                          disabled={availableStock <= 0}
                           className="w-6 h-6 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-sm hover:bg-black hover:scale-105 active:scale-95 transition-all shadow-md disabled:bg-slate-100 disabled:text-slate-200"
                         >
                           +

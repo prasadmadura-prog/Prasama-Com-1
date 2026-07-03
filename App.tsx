@@ -7,7 +7,7 @@ import {
   bulkUpsert,
   collections as dbCols
 } from './services/database';
-import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation } from './types';
+import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation, FixedAsset } from './types';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import POS from './components/POS';
@@ -50,7 +50,7 @@ const App: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: "PRASAMA ERP",
     branch: "CASHIER 1",
-    allBranches: ["CASHIER 1", "CASHIER 2", "CASHIER 3"],
+    allBranches: ["CASHIER 1", "CASHIER 2", "CASHIER 3", "CASHIER 4"],
     phone: "",
     isAdmin: false
   });
@@ -76,9 +76,9 @@ const App: React.FC = () => {
   // Helper to enforce Shared Inventory: CASHIER 1 is the Master Inventory Node
   // Any sale from CASHIER 2 or others will deduct from CASHIER 1's stock
   const getStockBranch = (branch: string) => {
-    const b = (branch || '').toUpperCase();
-    if (b === 'CASHIER 2' || b === 'CASHIER 3' || b === 'SHOP 2' || b === 'LOCAL NODE') return 'CASHIER 1';
-    return branch || 'CASHIER 1';
+    const b = (branch || '').toUpperCase().trim();
+    if (b === 'SHOP 2' || b === 'LOCAL NODE' || b === 'BOOKSHOP') return 'CASHIER 1';
+    return b || 'CASHIER 1';
   };
 
   const [posSession, setPosSession] = useState<POSSession>({
@@ -128,6 +128,9 @@ const App: React.FC = () => {
       }
       if (!newProfile.allBranches.includes('CASHIER 2')) newProfile.allBranches.push('CASHIER 2');
       if (!newProfile.allBranches.includes('CASHIER 3')) newProfile.allBranches.push('CASHIER 3');
+      if (newProfile.isAdmin || emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com') {
+        if (!newProfile.allBranches.includes('CASHIER 4')) newProfile.allBranches.push('CASHIER 4');
+      }
       if (newProfile.isAdmin && !newProfile.allBranches.includes('ALL')) {
         newProfile.allBranches.unshift('ALL');
       }
@@ -177,18 +180,20 @@ const App: React.FC = () => {
       subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])),
       subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])),
       subscribeToDocument(dbCols.profile, 'main', (data: any) => {
-        setUserProfile(prev => ({
-          ...prev,
-          // Preserve local user-specific identity
-          name: prev.name,
-          branch: prev.branch,
-          loginUsername: prev.loginUsername,
-          // Sync global branding/corporate identity
-          companyName: data.companyName || prev.companyName,
-          companyAddress: data.companyAddress || prev.companyAddress,
-          logo: data.logo || prev.logo,
-          phone: data.phone || prev.phone,
-        }));
+        if (data) {
+          setUserProfile(prev => ({
+            ...prev,
+            // Preserve local user-specific identity
+            name: prev.name,
+            branch: prev.branch,
+            loginUsername: prev.loginUsername,
+            // Sync global branding/corporate identity
+            companyName: data.companyName || prev.companyName,
+            companyAddress: data.companyAddress || prev.companyAddress,
+            logo: data.logo || prev.logo,
+            phone: data.phone || prev.phone,
+          }));
+        }
       })
     ];
 
@@ -288,7 +293,7 @@ const App: React.FC = () => {
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
-              stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0)
+              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
             });
           }
         }
@@ -527,13 +532,14 @@ const App: React.FC = () => {
           if (product) {
             const bStocks = { ...(product.branchStocks || {}) };
             const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
+            const productCategory = categories.find(c => c.id === product.categoryId);
             const categoryName = (productCategory?.name || '').toUpperCase();
             const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
             bStocks[stockBranch] = isHotReload ? (Number(currentStock) + netChange) : Math.max(0, Number(currentStock) + netChange);
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
-              stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0)
+              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
             });
           }
         }
@@ -702,7 +708,7 @@ const App: React.FC = () => {
           await upsertDocument(dbCols.products, product.id, {
             ...product,
             branchStocks: bStocks,
-            stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0)
+            stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
           });
         }
       }
@@ -723,7 +729,7 @@ const App: React.FC = () => {
             await upsertDocument(dbCols.products, product.id, {
               ...product,
               branchStocks: bStocks,
-              stock: (Object.values(bStocks) as number[]).reduce((a, b: any) => a + b, 0)
+              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
             });
           }
         }
@@ -866,7 +872,7 @@ const App: React.FC = () => {
         await upsertDocument(dbCols.products, product.id, {
           ...product,
           branchStocks: bStocks,
-          stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0),
+          stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0),
           cost: Number(item.cost)
         });
       }
@@ -1008,8 +1014,8 @@ const App: React.FC = () => {
       const finalTx = sanitizeData({
         ...tx,
         id: txId,
-        date: getLocalDateString() + 'T12:00:00',
-        branchId: userProfile.branch,
+        date: tx.date || (getLocalDateString() + 'T12:00:00'),
+        branchId: tx.branchId || userProfile.branch,
         updatedAt: new Date().toISOString()
       });
 
@@ -1035,7 +1041,7 @@ const App: React.FC = () => {
       const finalTx = sanitizeData({
         ...tx,
         id: txId,
-        date: getLocalDateString() + 'T12:00:00',
+        date: tx.date || (getLocalDateString() + 'T12:00:00'),
         branchId: userProfile.branch,
         updatedAt: new Date().toISOString()
       });

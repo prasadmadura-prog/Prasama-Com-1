@@ -62,7 +62,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users = [] }) => {
       companyName: "PRASAMA(PVT)LTD", // Explicitly set company name
       companyAddress: "No 16, Kirulapana Supermarket, Colombo 05",
       branch: branchName,
-      allBranches: (branchName === "CASHIER 2") ? ["CASHIER 1", "CASHIER 2"] : (isAdmin ? ["CASHIER 1", "CASHIER 2", "CASHIER 3"] : ["CASHIER 1", "CASHIER 2"]),
+      allBranches: (normalizedUser === 'madupathirana95@gmail.com') ? ["CASHIER 1", "CASHIER 2", "CASHIER 4"] : ((branchName === "CASHIER 2") ? ["CASHIER 1", "CASHIER 2"] : (isAdmin ? ["CASHIER 1", "CASHIER 2", "CASHIER 3", "CASHIER 4"] : ["CASHIER 1", "CASHIER 2"])),
       loginUsername: credentials.username,
       isAdmin: isAdmin
     });

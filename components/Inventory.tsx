@@ -155,11 +155,11 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const handleExportCatalog = () => {
     if (products.length === 0) return alert("Catalog is empty.");
-    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Total Cost Value', 'Total Sales Value', 'Category', 'Primary Vendor', 'Alert Threshold'];
+    const headers = ['Name', 'SKU', 'Cost', 'Price', 'Global Stock', 'Cashier 1', 'Cashier 2', 'Cashier 3', 'Cashier 4', 'Total Cost Value', 'Total Sales Value', 'Category', 'Primary Vendor', 'Alert Threshold'];
     const rows = products.map(p => {
       const cost = Number(p.cost) || 0;
       const price = Number(p.price) || 0;
-      const stock = Number(p.stock) || 0;
+      const stock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (Number(p.stock) || 0);
       
       return [
         p.name.replace(/,/g, ''),
@@ -167,6 +167,10 @@ const Inventory: React.FC<InventoryProps> = ({
         cost,
         price,
         stock,
+        p.branchStocks?.['CASHIER 1'] || 0,
+        p.branchStocks?.['CASHIER 2'] || 0,
+        p.branchStocks?.['CASHIER 3'] || 0,
+        p.branchStocks?.['CASHIER 4'] || 0,
         (cost * stock).toFixed(2),
         (price * stock).toFixed(2),
         getCategoryName(p.categoryId).replace(/,/g, ''),
@@ -219,8 +223,11 @@ const Inventory: React.FC<InventoryProps> = ({
     const finalSku = skuValue.trim() || getNextSku();
 
 
-    const bStocks = { ...(editingProduct?.branchStocks || {}) };
-    bStocks[userProfile.branch] = parseInt(formData.get('stock') as string) || 0;
+    const bStocks: Record<string, number> = { ...(editingProduct?.branchStocks || {}) };
+    bStocks['CASHIER 1'] = parseInt(formData.get('stock_cashier1') as string) || 0;
+    bStocks['CASHIER 2'] = parseInt(formData.get('stock_cashier2') as string) || 0;
+    bStocks['CASHIER 3'] = parseInt(formData.get('stock_cashier3') as string) || 0;
+    bStocks['CASHIER 4'] = parseInt(formData.get('stock_cashier4') as string) || 0;
 
     const productData: Product = {
       id: editingProduct?.id || `P-${Date.now()}`,
@@ -231,7 +238,7 @@ const Inventory: React.FC<InventoryProps> = ({
       cost: costValue,
       price: priceValue,
       branchStocks: bStocks,
-      stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0),
+      stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(bStocks[b]) || 0), 0),
       lowStockThreshold: parseInt(formData.get('lowStockThreshold') as string) || 5,
       internalNotes: (formData.get('internalNotes') as string) || '',
     };
@@ -298,7 +305,7 @@ const Inventory: React.FC<InventoryProps> = ({
             price: parseFloat(item.price || item.selling_price) || 0,
             cost: parseFloat(item.cost || item.unit_cost) || 0,
             branchStocks: bStocks,
-            stock: (Object.values(bStocks) as number[]).reduce((a, b) => a + b, 0),
+            stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(bStocks[b]) || 0), 0),
             categoryId: catId,
             vendorId: vendors.find(v => v.name.toUpperCase() === String(item['primary vendor'] || item.vendor || '').toUpperCase())?.id || item.vendor_id || '',
             lowStockThreshold: parseInt(item.alert_threshold || item.threshold) || 5,
@@ -397,7 +404,7 @@ const Inventory: React.FC<InventoryProps> = ({
             {(() => {
               const stats = filteredProducts.reduce((acc, p) => {
                 const bStock = p.branchStocks ? (Number(p.branchStocks[userProfile.branch]) || 0) : (Number(p.stock) || 0);
-                const gStock = p.branchStocks ? (Object.values(p.branchStocks) as number[]).reduce((a, b) => a + (Number(b) || 0), 0) : (Number(p.stock) || 0);
+                const gStock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (Number(p.stock) || 0);
 
                 return {
                   unitsBranch: acc.unitsBranch + bStock,
@@ -442,7 +449,11 @@ const Inventory: React.FC<InventoryProps> = ({
                   <th className="px-10 py-6">Identity / SKU</th>
                   <th className="px-10 py-6">Classification</th>
                   <th className="px-10 py-6 text-right">LKR Value</th>
-                  <th className="px-10 py-6 text-center">Branch Stock ({userProfile.branch})</th>
+                  <th className="px-4 py-6 text-center">Cashier 1</th>
+                  <th className="px-4 py-6 text-center">Cashier 2</th>
+                  <th className="px-4 py-6 text-center">Cashier 3</th>
+                  <th className="px-4 py-6 text-center">Cashier 4</th>
+                  <th className="px-6 py-6 text-center">Total</th>
                   <th className="px-10 py-6 text-center">Action</th>
                 </tr>
               </thead>
@@ -460,18 +471,36 @@ const Inventory: React.FC<InventoryProps> = ({
                       <span className="text-[10px] font-black text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">{getCategoryName(p.categoryId)}</span>
                     </td>
                     <td className="px-10 py-4 text-right font-black text-slate-900 font-mono text-[13px]">Rs. {Number(p.price).toLocaleString()}</td>
-                    <td className="px-10 py-4 text-center">
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${((p.branchStocks?.['CASHIER 1'] ?? p.stock) || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                        {p.branchStocks?.['CASHIER 1'] ?? p.stock}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 2'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                        {p.branchStocks?.['CASHIER 2'] || 0}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 3'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                        {p.branchStocks?.['CASHIER 3'] || 0}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 4'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                        {p.branchStocks?.['CASHIER 4'] || 0}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-center">
                       <div className="flex flex-col items-center">
                         {(() => {
-                          const currentBranchStock = p.branchStocks ? (p.branchStocks[userProfile.branch] || 0) : p.stock;
-                          const totalStock = p.branchStocks ? (Object.values(p.branchStocks) as number[]).reduce((a, b) => a + b, 0) : p.stock;
+                          const totalStock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (p.stock || 0);
 
                           return (
                             <>
-                              <span className={`px-4 py-1.5 rounded-xl text-[11px] font-black tracking-tight ${currentBranchStock <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600 animate-pulse border border-rose-100' : 'bg-slate-50 text-slate-900 border border-slate-100'}`}>
-                                {currentBranchStock} <span className="opacity-40 ml-1 text-[9px] uppercase">Units</span>
+                              <span className={`px-4 py-1.5 rounded-xl text-[11px] font-black tracking-tight ${totalStock <= p.lowStockThreshold ? 'bg-rose-100 text-rose-700 animate-pulse border border-rose-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                                {totalStock} <span className="opacity-40 ml-1 text-[9px] uppercase">Units</span>
                               </span>
-                              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mt-1">Total: {totalStock} Units</p>
                             </>
                           );
                         })()}
@@ -657,68 +686,50 @@ const Inventory: React.FC<InventoryProps> = ({
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Initial Stock ({userProfile.branch})</label>
-                      <input
-                        name="stock"
-                        type="number"
-                        defaultValue={editingProduct ? (editingProduct.branchStocks ? (editingProduct.branchStocks[userProfile.branch] || 0) : editingProduct.stock) : 0}
-                        required
-                        className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white"
-                      />
-                      {editingProduct && editingProduct.branchStocks && (() => {
-                        const total = Number(Object.values(editingProduct.branchStocks).reduce((acc: number, b) => acc + Number(b || 0), 0));
-                        const current = Number(editingProduct.branchStocks[userProfile.branch]) || 0;
-                        const others = total - current;
-                        if (others > 0) {
-                          return (
-                            <div className="mt-2 flex items-center justify-between bg-amber-50 p-2 rounded-xl border border-amber-100">
-                              <span className="text-[9px] font-bold text-amber-700 uppercase tracking-wide">⚠️ {others} Units in other branches</span>
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (!confirm("Clear all stock from other branches? This cannot be undone.")) return;
-
-                                  const currentBranch = userProfile.branch;
-                                  const currentStock = Number(editingProduct.branchStocks?.[currentBranch]) || 0;
-
-                                  // Construct a new object where EVERY other known branch is set to 0.
-                                  // This is necessary because upsertDocument uses {merge: true}.
-                                  const clearedStocks: Record<string, number> = {};
-                                  if (editingProduct.branchStocks) {
-                                    Object.keys(editingProduct.branchStocks).forEach(branchName => {
-                                      clearedStocks[branchName] = branchName === currentBranch ? currentStock : 0;
-                                    });
-                                  } else {
-                                    clearedStocks[currentBranch] = currentStock;
-                                  }
-
-                                  const updatedProduct: Product = {
-                                    ...editingProduct,
-                                    branchStocks: clearedStocks,
-                                    stock: currentStock
-                                  };
-
-                                  try {
-                                    setSaveStatus('SAVING');
-                                    await onUpsertProduct(updatedProduct);
-                                    setEditingProduct(updatedProduct);
-                                    setSaveStatus('SUCCESS');
-                                    setTimeout(() => setSaveStatus('IDLE'), 1000);
-                                  } catch (e: any) {
-                                    alert("Error: " + e.message);
-                                    setSaveStatus('IDLE');
-                                  }
-                                }}
-                                className="text-[9px] font-black bg-white text-amber-600 border border-amber-200 px-2 py-1 rounded-lg hover:bg-amber-100"
-                              >
-                                Clear Others
-                              </button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()}
+                    <div className="space-y-3 col-span-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Stock Distribution</label>
+                       <div className="grid grid-cols-4 gap-3">
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 1</p>
+                            <input
+                              name="stock_cashier1"
+                              type="number"
+                              defaultValue={editingProduct?.branchStocks?.['CASHIER 1'] ?? (editingProduct?.stock || 0)}
+                              required
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 2</p>
+                            <input
+                              name="stock_cashier2"
+                              type="number"
+                              defaultValue={editingProduct?.branchStocks?.['CASHIER 2'] || 0}
+                              required
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 3</p>
+                            <input
+                              name="stock_cashier3"
+                              type="number"
+                              defaultValue={editingProduct?.branchStocks?.['CASHIER 3'] || 0}
+                              required
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 4</p>
+                            <input
+                              name="stock_cashier4"
+                              type="number"
+                              defaultValue={editingProduct?.branchStocks?.['CASHIER 4'] || 0}
+                              required
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
+                            />
+                          </div>
+                       </div>
                     </div>
                     <div className="space-y-1">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Alert Threshold</label>

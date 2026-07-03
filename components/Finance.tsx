@@ -37,7 +37,10 @@ const Finance: React.FC<FinanceProps> = ({
       return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
    };
    const today = getTodayLocal();
-   const currentSession = daySessions.find(s => s.date === today);
+
+   // Drawer branch selector — admin can switch, others locked to their own branch
+   const [drawerBranch, setDrawerBranch] = useState(userProfile.branch);
+   const currentSession = daySessions.find(s => s.date === today && (s.branchId === drawerBranch || (!s.branchId && drawerBranch === userProfile.branch)));
    const dayTransactions = transactions.filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === today);
 
    // Modals State
@@ -63,6 +66,7 @@ const Finance: React.FC<FinanceProps> = ({
    const [expIsLoan, setExpIsLoan] = useState(false);
    const [expCustomerId, setExpCustomerId] = useState('');
    const [expDate, setExpDate] = useState(today);
+   const [expBranch, setExpBranch] = useState(userProfile.branch);
 
    const [transAmount, setTransAmount] = useState('');
    const [transSource, setTransSource] = useState('cash');
@@ -85,6 +89,17 @@ const Finance: React.FC<FinanceProps> = ({
           return matchesDate && matchesBranch;
        });
    }, [transactions, startDate, endDate, dayTransactions, today, userProfile]);
+
+   // Drawer-specific transactions filtered by the selected drawerBranch
+   const drawerTransactions = useMemo(() => {
+      const isFiltering = startDate !== today || endDate !== today;
+      if (!isFiltering) return dayTransactions.filter(t => t.branchId === drawerBranch);
+      return transactions.filter(t => {
+          const txDate = (t.date || '').split('T')[0];
+          const matchesDate = txDate >= startDate && txDate <= endDate;
+          return matchesDate && t.branchId === drawerBranch;
+       });
+   }, [transactions, startDate, endDate, dayTransactions, today, drawerBranch]);
 
    // Column Filters
    const [filterEntity, setFilterEntity] = useState('');
@@ -122,6 +137,17 @@ const Finance: React.FC<FinanceProps> = ({
          .filter(t => t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId))
          .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
+      const totalExpenses = dataToUse
+         .filter(t => t.type === 'EXPENSE')
+         .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+      return { totalInflow, totalOutflow, totalExpenses };
+   }, [periodTransactions]);
+
+   // Drawer stats calculated from drawerTransactions (filtered by drawerBranch)
+   const drawerStats = useMemo(() => {
+      const dataToUse = drawerTransactions;
+
       const cashIn = dataToUse
          .filter(t => (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || (t.type === 'TRANSFER' && t.destinationAccountId === 'cash')) && t.paymentMethod === 'CASH')
          .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
@@ -130,15 +156,11 @@ const Finance: React.FC<FinanceProps> = ({
          .filter(t => (t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId === 'cash')) && t.paymentMethod === 'CASH')
          .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-      const totalExpenses = dataToUse
-         .filter(t => t.type === 'EXPENSE')
-         .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-
       const opening = Number(currentSession?.openingBalance) || 0;
       const expectedCash = opening + cashIn - cashOut;
 
-      return { cashIn, cashOut, expectedCash, totalInflow, totalOutflow, totalExpenses };
-   }, [periodTransactions, currentSession]);
+      return { cashIn, cashOut, expectedCash };
+   }, [drawerTransactions, currentSession]);
 
    const uniqueCategories = useMemo(() => {
       const historyCategories = transactions
@@ -181,7 +203,8 @@ const Finance: React.FC<FinanceProps> = ({
             accountId: expSource,
             type: finalType,
             customerId: expIsLoan ? expCustomerId : undefined,
-            date: finalDate
+            date: finalDate,
+            branchId: expBranch
          });
       } else {
          onAddExpense({
@@ -193,7 +216,8 @@ const Finance: React.FC<FinanceProps> = ({
             accountId: expSource,
             type: finalType,
             customerId: expIsLoan ? expCustomerId : undefined,
-            date: finalDate
+            date: finalDate,
+            branchId: expBranch
          });
       }
 
@@ -204,6 +228,7 @@ const Finance: React.FC<FinanceProps> = ({
       setExpIsLoan(false);
       setExpCustomerId('');
       setExpDate(today);
+      setExpBranch(userProfile.branch);
       setEditingTransaction(null);
       setShowExpenseModal(false);
    };
@@ -260,6 +285,7 @@ const Finance: React.FC<FinanceProps> = ({
       setExpIsLoan(tx.type === 'LOAN_GIVEN');
       setExpCustomerId(tx.customerId || '');
       setExpDate(tx.date.split('T')[0]);
+      setExpBranch(tx.branchId || userProfile.branch);
       setShowExpenseModal(true);
    };
 
@@ -399,6 +425,7 @@ const Finance: React.FC<FinanceProps> = ({
                   setExpIsLoan(false);
                   setExpCustomerId('');
                   setExpDate(today);
+                  setExpBranch(userProfile.branch);
                   setShowExpenseModal(true);
                }} className="bg-rose-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-200">Record Expense</button>
 
@@ -411,25 +438,41 @@ const Finance: React.FC<FinanceProps> = ({
                   }} className="bg-indigo-600 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all">Initialize Float</button>
                ) : (
                   <button onClick={() => {
-                     const actual = prompt("Actual Closing Cash in Drawer:", dayStats.expectedCash.toString());
+                     const actual = prompt("Actual Closing Cash in Drawer:", drawerStats.expectedCash.toString());
                      if (actual !== null) onCloseDay(parseFloat(actual) || 0);
                   }} className="bg-amber-500 text-white px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl hover:bg-amber-600 transition-all">Close Register</button>
                )}
             </div>
          </header>
 
+         {/* Drawer Branch Selector */}
+         {userProfile.isAdmin && userProfile.allBranches && userProfile.allBranches.length > 0 && (
+            <div className="flex items-center gap-3">
+               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Drawer Terminal:</span>
+               <select
+                  value={drawerBranch}
+                  onChange={(e) => setDrawerBranch(e.target.value)}
+                  className="bg-white px-5 py-3 rounded-2xl border border-slate-200 outline-none text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:border-indigo-300 transition-all cursor-pointer shadow-sm"
+               >
+                  {userProfile.allBranches.filter(b => b !== 'ALL').map(b => (
+                     <option key={b} value={b}>{b}</option>
+                  ))}
+               </select>
+            </div>
+         )}
+
          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
                <div className="absolute -right-4 -top-4 w-24 h-24 bg-slate-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Opening Cash Float</p>
                <p className="text-2xl font-black font-mono text-slate-900 tracking-tighter">Rs. {Number(currentSession?.openingBalance || 0).toLocaleString()}</p>
-               <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase">Initial Liquidity Entry</p>
+               <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase">Initial Liquidity Entry — {drawerBranch}</p>
             </div>
             <div className="bg-indigo-600 p-6 rounded-2xl shadow-xl shadow-indigo-100 relative overflow-hidden">
                <div className="absolute right-0 bottom-0 p-2 opacity-10 text-5xl font-black italic select-none">CASH</div>
                <p className="text-[9px] font-black text-indigo-200 uppercase tracking-widest mb-2">Expected Drawer Balance</p>
-               <p className="text-2xl font-black font-mono text-white tracking-tighter">Rs. {dayStats.expectedCash.toLocaleString()}</p>
-               <p className="text-[8px] font-bold text-indigo-300 mt-1 uppercase">Based on Real-Time Inflow/Outflow</p>
+               <p className="text-2xl font-black font-mono text-white tracking-tighter">Rs. {drawerStats.expectedCash.toLocaleString()}</p>
+               <p className="text-[8px] font-bold text-indigo-300 mt-1 uppercase">Based on Real-Time Inflow/Outflow — {drawerBranch}</p>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
                <div className="absolute -right-4 -top-4 w-24 h-24 bg-emerald-50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -608,9 +651,16 @@ const Finance: React.FC<FinanceProps> = ({
                         setExpIsLoan(false);
                         setExpCustomerId('');
                         setExpDate(today);
+                        setExpBranch(userProfile.branch);
                      }} className="text-slate-300 hover:text-slate-900 text-2xl leading-none">&times;</button>
                   </div>
                   <form onSubmit={handleExpenseSubmit} className="p-5 space-y-3 overflow-y-auto">
+                     <div className="space-y-0.5">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Assign to Cashier/Branch</label>
+                        <select value={expBranch} onChange={e => setExpBranch(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white outline-none focus:border-indigo-500">
+                           {userProfile.allBranches?.filter(b => b !== 'ALL').map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                     </div>
                      <div className="space-y-0.5">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Source Account</label>
                         <select value={expSource} onChange={e => setExpSource(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black uppercase text-[10px] bg-white outline-none focus:border-indigo-500">

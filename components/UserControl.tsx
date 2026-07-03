@@ -19,7 +19,7 @@ const UserControl: React.FC<UserControlProps> = ({ userProfile }) => {
   const [loginPassword, setLoginPassword] = useState('');
   const [branch, setBranch] = useState('CASHIER 1');
   const [isAdmin, setIsAdmin] = useState(false);
-  const [allBranches, setAllBranches] = useState<string[]>(['CASHIER 1', 'CASHIER 2', 'CASHIER 3']);
+  const [allBranches, setAllBranches] = useState<string[]>(['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']);
 
   useEffect(() => {
     const unsub = subscribeToCollection(dbCols.users, (data) => setUsers(data as UserProfile[]));
@@ -35,7 +35,7 @@ const UserControl: React.FC<UserControlProps> = ({ userProfile }) => {
       setLoginPassword(user.loginPassword || '');
       setBranch(user.branch);
       setIsAdmin(user.isAdmin || false);
-      setAllBranches(user.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3']);
+      setAllBranches(user.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']);
     } else {
       setEditingUser(null);
       setName('');
@@ -44,7 +44,7 @@ const UserControl: React.FC<UserControlProps> = ({ userProfile }) => {
       setLoginPassword('');
       setBranch('CASHIER 1');
       setIsAdmin(false);
-      setAllBranches(['CASHIER 1', 'CASHIER 2', 'CASHIER 3']);
+      setAllBranches(['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']);
     }
     setIsModalOpen(true);
   };
@@ -228,6 +228,7 @@ const UserControl: React.FC<UserControlProps> = ({ userProfile }) => {
                     <option value="CASHIER 1">CASHIER 1 (Master)</option>
                     <option value="CASHIER 2">CASHIER 2</option>
                     <option value="CASHIER 3">CASHIER 3</option>
+                    <option value="CASHIER 4">CASHIER 4</option>
                   </select>
                 </div>
                 <div className="space-y-2">

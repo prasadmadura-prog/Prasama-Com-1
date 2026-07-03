@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Transaction, Product, BankAccount, View, PurchaseOrder, DaySession, Customer, Vendor, Category, UserProfile } from '../types';
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, Legend, PieChart, Pie } from 'recharts';
 
@@ -75,6 +75,7 @@ const KPI: React.FC<KPIProps> = ({
         const desc = txDescription.toUpperCase();
 
         if (cName.includes('CARD')) return false;
+        if (pName.includes('SIM') || cName.includes('SIM') || desc.includes('SIM')) return false;
 
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||
@@ -96,8 +97,10 @@ const KPI: React.FC<KPIProps> = ({
             // Date Filter
             const txDate = t.date.split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
+            
+            const isValidStatus = t.status !== 'DRAFT' && t.status !== 'VOID';
 
-            return branchMatch && dateMatch;
+            return branchMatch && dateMatch && isValidStatus;
         });
 
         const totalRevenue = filteredTxs
@@ -176,7 +179,7 @@ const KPI: React.FC<KPIProps> = ({
             const txDate = t.date.split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
 
-            if (!branchMatch || !dateMatch) return;
+            if (!branchMatch || !dateMatch || t.status === 'DRAFT' || t.status === 'VOID') return;
 
             t.items?.forEach(i => {
                 const p = products.find(prod => prod.id === i.productId);
@@ -208,6 +211,7 @@ const KPI: React.FC<KPIProps> = ({
 
             const txDate = t.date.split('T')[0];
             if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
+            if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
             if (t.items) {
                 t.items.forEach(item => {
@@ -252,6 +256,7 @@ const KPI: React.FC<KPIProps> = ({
 
             const txDate = t.date.split('T')[0];
             if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
+            if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
             if (t.items) {
                 t.items.forEach(item => {
@@ -303,7 +308,7 @@ const KPI: React.FC<KPIProps> = ({
             const txDate = t.date.split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
 
-            if (!branchMatch || !dateMatch) return;
+            if (!branchMatch || !dateMatch || t.status === 'DRAFT' || t.status === 'VOID') return;
 
             // Extract hour
             let hour = 0;
@@ -361,6 +366,7 @@ const KPI: React.FC<KPIProps> = ({
             const tBranch = normalizeBranch(t.branchId);
             const target = normalizeBranch(branchFilter);
             if (branchFilter !== 'ALL' && tBranch !== target) return;
+            if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
             if (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') {
                 if (t.items) {
@@ -417,6 +423,7 @@ const KPI: React.FC<KPIProps> = ({
             const tBranch = normalizeBranch(t.branchId);
             const target = normalizeBranch(branchFilter);
             if (branchFilter !== 'ALL' && tBranch !== target) return;
+            if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
             if (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') {
                 const amount = Number(t.amount || 0);
@@ -504,6 +511,7 @@ const KPI: React.FC<KPIProps> = ({
             const tBranch = normalizeBranch(t.branchId);
             const target = normalizeBranch(branchFilter);
             if (branchFilter !== 'ALL' && tBranch !== target) return;
+            if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
             if (t.type === 'SALE') {
                 const desc = (t.description || '').toUpperCase();
@@ -922,9 +930,569 @@ const KPI: React.FC<KPIProps> = ({
                 </div>
             </div>
 
+            {/* Editable Pivot Table: Category × Month Sales Revenue */}
+            <PivotTable
+                transactions={transactions}
+                products={products}
+                categories={categories}
+                branchFilter={branchFilter}
+                normalizeBranch={normalizeBranch}
+                isHotReloadItem={isHotReloadItem}
+                getReloadRate={getReloadRate}
+            />
+
 
         </div>
     );
 };
 
 export default KPI;
+
+// ─── PivotTable Sub-Component ────────────────────────────────────────
+
+interface PivotTableProps {
+    transactions: Transaction[];
+    products: Product[];
+    categories: Category[];
+    branchFilter: string;
+    normalizeBranch: (b?: string) => string;
+    isHotReloadItem: (item: any, product: Product | undefined, category: Category | undefined, txDescription?: string) => boolean;
+    getReloadRate: (txDescription?: string, productName?: string) => number;
+}
+
+const PivotTable: React.FC<PivotTableProps> = ({
+    transactions, products, categories, branchFilter, normalizeBranch, isHotReloadItem, getReloadRate
+}) => {
+    const [editOverrides, setEditOverrides] = useState<Record<string, number>>({});
+    const [editingCell, setEditingCell] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState('');
+    const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+    const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set());
+    const [selectedTerminals, setSelectedTerminals] = useState<Set<string>>(new Set());
+    const [showCatFilter, setShowCatFilter] = useState(false);
+    const [showMonthFilter, setShowMonthFilter] = useState(false);
+    const [showTerminalFilter, setShowTerminalFilter] = useState(false);
+
+    // Compute pivot data
+    const pivotData = useMemo(() => {
+        const map: Record<string, Record<number, number>> = {};
+        const revMap: Record<string, Record<number, number>> = {};
+        const profitMap: Record<string, Record<number, number>> = {};
+        const terminalRevMap: Record<string, Record<number, number>> = {};
+        const monthSet = new Set<number>();
+        const terminalSet = new Set<string>();
+
+        transactions.filter(t => (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') && t.status !== 'DRAFT' && t.status !== 'VOID').forEach(t => {
+            const tBranch = normalizeBranch(t.branchId);
+            const target = normalizeBranch(branchFilter);
+            if (branchFilter !== 'ALL' && tBranch !== target) return;
+
+            terminalSet.add(tBranch);
+
+            if (selectedTerminals.size > 0 && !selectedTerminals.has(tBranch)) return;
+
+            const txDate = new Date(t.date);
+            const month = txDate.getMonth() + 1;
+            monthSet.add(month);
+
+            if (!terminalRevMap[tBranch]) terminalRevMap[tBranch] = {};
+
+            if (t.items) {
+                t.items.forEach(item => {
+                    const product = products.find(p => p.id === item.productId);
+                    const catId = product?.categoryId || 'Uncategorized';
+                    const categoryObj = categories.find(c => c.id === catId);
+                    const catName = categoryObj?.name || 'Uncategorized';
+                    const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+                    
+                    let rev = lineTotal;
+                    let profit = 0;
+                    const cost = Number(product?.cost || 0) * Number(item.quantity);
+                    
+                    if (isHotReloadItem(item, product, categoryObj, t.description)) {
+                        rev = lineTotal * getReloadRate(t.description, product?.name);
+                        profit = rev;
+                    } else {
+                        profit = lineTotal - cost;
+                    }
+
+                    if (!map[catName]) map[catName] = {};
+                    map[catName][month] = (map[catName][month] || 0) + lineTotal;
+
+                    if (!revMap[catName]) revMap[catName] = {};
+                    revMap[catName][month] = (revMap[catName][month] || 0) + rev;
+
+                    if (!profitMap[catName]) profitMap[catName] = {};
+                    profitMap[catName][month] = (profitMap[catName][month] || 0) + profit;
+
+                    terminalRevMap[tBranch][month] = (terminalRevMap[tBranch][month] || 0) + rev;
+                });
+            } else {
+                const catName = (t.category || t.mainCategory || 'Uncategorized').toUpperCase();
+                if (!map[catName]) map[catName] = {};
+                map[catName][month] = (map[catName][month] || 0) + Number(t.amount || 0);
+
+                if (!revMap[catName]) revMap[catName] = {};
+                revMap[catName][month] = (revMap[catName][month] || 0) + Number(t.amount || 0);
+
+                if (!profitMap[catName]) profitMap[catName] = {};
+                const isReload = catName.includes('RELOAD');
+                const amt = Number(t.amount || 0);
+                profitMap[catName][month] = (profitMap[catName][month] || 0) + (isReload ? amt * 0.05 : amt);
+
+                const rev = Number(t.amount || 0);
+                terminalRevMap[tBranch][month] = (terminalRevMap[tBranch][month] || 0) + rev;
+            }
+        });
+
+        const allMonths = Array.from(monthSet).sort((a, b) => a - b);
+        const allCategories = Object.keys(map).sort();
+        const allTerminals = Array.from(terminalSet).sort();
+
+        const months = selectedMonths.size > 0 ? allMonths.filter(m => selectedMonths.has(m)) : allMonths;
+        const rows = Object.entries(map)
+            .filter(([cat]) => selectedCategories.size === 0 || selectedCategories.has(cat))
+            .map(([category, monthData]) => {
+                const rowTotal = months.reduce((sum, m) => sum + (monthData[m] || 0), 0);
+                return { category, monthData, rowTotal };
+            })
+            .sort((a, b) => b.rowTotal - a.rowTotal);
+
+        const columnTotals: Record<number, number> = {};
+        const revenueTotals: Record<number, number> = {};
+        const profitTotals: Record<number, number> = {};
+
+        months.forEach(m => {
+            let colSum = 0;
+            let revSum = 0;
+            let profitSum = 0;
+            rows.forEach(r => {
+                const key = `${r.category}-${m}`;
+                const originalVal = r.monthData[m] || 0;
+                const val = editOverrides[key] !== undefined ? editOverrides[key] : originalVal;
+                colSum += val;
+
+                const originalRev = revMap[r.category]?.[m] || 0;
+                const originalProfit = profitMap[r.category]?.[m] || 0;
+
+                if (val === originalVal) {
+                    revSum += originalRev;
+                    profitSum += originalProfit;
+                } else {
+                    if (originalVal > 0) {
+                        revSum += val * (originalRev / originalVal);
+                        profitSum += val * (originalProfit / originalVal);
+                    } else {
+                        const isReload = r.category.toUpperCase().includes('RELOAD');
+                        revSum += isReload ? val * 0.05 : val;
+                        profitSum += isReload ? val * 0.05 : val;
+                    }
+                }
+            });
+            columnTotals[m] = colSum;
+            revenueTotals[m] = revSum;
+            profitTotals[m] = profitSum;
+        });
+
+        const scaledTerminalRev: Record<string, Record<number, number>> = {};
+        allTerminals.forEach(t => {
+            scaledTerminalRev[t] = {};
+            months.forEach(m => {
+                const originalTermRev = terminalRevMap[t]?.[m] || 0;
+                const origTotal = rows.reduce((sum, r) => sum + (revMap[r.category]?.[m] || 0), 0);
+                const scale = origTotal > 0 ? (revenueTotals[m] || 0) / origTotal : 1;
+                scaledTerminalRev[t][m] = originalTermRev * scale;
+            });
+        });
+
+        const grandTotal = Object.values(columnTotals).reduce((a, b) => a + b, 0);
+        const grandRevenueTotal = Object.values(revenueTotals).reduce((a, b) => a + b, 0);
+        const grandProfitTotal = Object.values(profitTotals).reduce((a, b) => a + b, 0);
+
+        return { rows, months, columnTotals, grandTotal, revenueTotals, grandRevenueTotal, profitTotals, grandProfitTotal, allCategories, allMonths, allTerminals, scaledTerminalRev };
+    }, [transactions, products, categories, branchFilter, editOverrides, selectedCategories, selectedMonths, selectedTerminals]);
+
+    const getCellValue = (category: string, month: number, originalValue: number) => {
+        const key = `${category}-${month}`;
+        return editOverrides[key] !== undefined ? editOverrides[key] : originalValue;
+    };
+
+    const handleStartEdit = (category: string, month: number, value: number) => {
+        const key = `${category}-${month}`;
+        setEditingCell(key);
+        setEditValue(value.toFixed(2));
+    };
+
+    const handleSaveEdit = (category: string, month: number) => {
+        const key = `${category}-${month}`;
+        const newVal = parseFloat(editValue);
+        if (!isNaN(newVal)) setEditOverrides(prev => ({ ...prev, [key]: newVal }));
+        setEditingCell(null);
+        setEditValue('');
+    };
+
+    const handleCancelEdit = () => { setEditingCell(null); setEditValue(''); };
+    const handleResetOverrides = () => { setEditOverrides({}); };
+
+    const toggleCategory = (cat: string) => {
+        setSelectedCategories(prev => {
+            const next = new Set(prev);
+            next.has(cat) ? next.delete(cat) : next.add(cat);
+            return next;
+        });
+    };
+
+    const toggleMonth = (m: number) => {
+        setSelectedMonths(prev => {
+            const next = new Set(prev);
+            next.has(m) ? next.delete(m) : next.add(m);
+            return next;
+        });
+    };
+
+    const toggleTerminal = (t: string) => {
+        setSelectedTerminals(prev => {
+            const next = new Set(prev);
+            next.has(t) ? next.delete(t) : next.add(t);
+            return next;
+        });
+    };
+
+    const handleExportCSV = () => {
+        const { rows, months, columnTotals, grandTotal, revenueTotals, grandRevenueTotal, profitTotals, grandProfitTotal } = pivotData;
+        const mn = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const headers = ['CATEGORY', ...months.map(m => mn[m]), 'ROW TOTAL'];
+        const csvRows = rows.map(r => {
+            const vals = months.map(m => getCellValue(r.category, m, r.monthData[m] || 0).toFixed(2));
+            const rowTotal = months.reduce((sum, m) => sum + getCellValue(r.category, m, r.monthData[m] || 0), 0);
+            return [r.category, ...vals, rowTotal.toFixed(2)];
+        });
+        const totalsRow = ['Grand Total', ...months.map(m => columnTotals[m].toFixed(2)), grandTotal.toFixed(2)];
+        const revRow = ['Revenue', ...months.map(m => revenueTotals[m].toFixed(2)), grandRevenueTotal.toFixed(2)];
+        const profitRow = ['Profit', ...months.map(m => profitTotals[m].toFixed(2)), grandProfitTotal.toFixed(2)];
+        const csvContent = [headers.join(','), ...csvRows.map(r => r.join(',')), totalsRow.join(','), revRow.join(','), profitRow.join(',')].join('\n');
+        const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `pivot_category_monthly_${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+    };
+
+    const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const { rows, months, columnTotals, grandTotal, revenueTotals, grandRevenueTotal, profitTotals, grandProfitTotal, allCategories, allMonths, allTerminals, scaledTerminalRev } = pivotData;
+    const hasOverrides = Object.keys(editOverrides).length > 0;
+    const hasFilters = selectedCategories.size > 0 || selectedMonths.size > 0 || selectedTerminals.size > 0;
+
+    return (
+        <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                <div>
+                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Sales Pivot Table</h3>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sum of Line Total (Rs) × Month # — Click cells to edit</p>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                    {/* Terminal Filter */}
+                    <div className="relative">
+                        <button
+                            onClick={() => { setShowTerminalFilter(!showTerminalFilter); setShowCatFilter(false); setShowMonthFilter(false); }}
+                            className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 ${selectedTerminals.size > 0 ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                        >
+                            🏪 Terminal {selectedTerminals.size > 0 && <span className="bg-sky-600 text-white px-1.5 py-0.5 rounded-md text-[8px]">{selectedTerminals.size}</span>}
+                            <span className="text-[8px]">▼</span>
+                        </button>
+                        {showTerminalFilter && (
+                            <div className="absolute top-full left-0 mt-2 w-[200px] bg-white rounded-2xl border border-slate-200 shadow-xl z-50 p-3 max-h-[300px] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-100">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter Terminals</span>
+                                    <button onClick={() => setSelectedTerminals(new Set())} className="text-[8px] font-black text-sky-500 uppercase hover:text-sky-700">Clear All</button>
+                                </div>
+                                {allTerminals.map(t => (
+                                    <label key={t} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                        <input type="checkbox" checked={selectedTerminals.has(t)} onChange={() => toggleTerminal(t)} className="rounded accent-sky-600" />
+                                        <span className="text-[10px] font-bold text-slate-700 uppercase truncate">{t}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Category Filter */}
+                    <div className="relative">
+                        <button
+                            onClick={() => { setShowCatFilter(!showCatFilter); setShowMonthFilter(false); setShowTerminalFilter(false); }}
+                            className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 ${selectedCategories.size > 0 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                        >
+                            🏷️ Category {selectedCategories.size > 0 && <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded-md text-[8px]">{selectedCategories.size}</span>}
+                            <span className="text-[8px]">▼</span>
+                        </button>
+                        {showCatFilter && (
+                            <div className="absolute top-full left-0 mt-2 w-[220px] bg-white rounded-2xl border border-slate-200 shadow-xl z-50 p-3 max-h-[300px] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-100">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter Categories</span>
+                                    <button onClick={() => setSelectedCategories(new Set())} className="text-[8px] font-black text-indigo-500 uppercase hover:text-indigo-700">Clear All</button>
+                                </div>
+                                {allCategories.map(cat => (
+                                    <label key={cat} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                        <input type="checkbox" checked={selectedCategories.has(cat)} onChange={() => toggleCategory(cat)} className="rounded accent-indigo-600" />
+                                        <span className="text-[10px] font-bold text-slate-700 uppercase truncate">{cat}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Month Filter */}
+                    <div className="relative">
+                        <button
+                            onClick={() => { setShowMonthFilter(!showMonthFilter); setShowCatFilter(false); setShowTerminalFilter(false); }}
+                            className={`px-4 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all active:scale-95 flex items-center gap-2 ${selectedMonths.size > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                        >
+                            📅 Month {selectedMonths.size > 0 && <span className="bg-emerald-600 text-white px-1.5 py-0.5 rounded-md text-[8px]">{selectedMonths.size}</span>}
+                            <span className="text-[8px]">▼</span>
+                        </button>
+                        {showMonthFilter && (
+                            <div className="absolute top-full left-0 mt-2 w-[180px] bg-white rounded-2xl border border-slate-200 shadow-xl z-50 p-3">
+                                <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-100">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Filter Months</span>
+                                    <button onClick={() => setSelectedMonths(new Set())} className="text-[8px] font-black text-emerald-500 uppercase hover:text-emerald-700">Clear All</button>
+                                </div>
+                                {allMonths.map(m => (
+                                    <label key={m} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                                        <input type="checkbox" checked={selectedMonths.has(m)} onChange={() => toggleMonth(m)} className="rounded accent-emerald-600" />
+                                        <span className="text-[10px] font-bold text-slate-700 uppercase">{monthNames[m]}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {hasFilters && (
+                        <button onClick={() => { setSelectedCategories(new Set()); setSelectedMonths(new Set()); setSelectedTerminals(new Set()); }} className="px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 transition-all active:scale-95">
+                            ✕ Clear Filters
+                        </button>
+                    )}
+                    {hasOverrides && (
+                        <button onClick={handleResetOverrides} className="px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 transition-all active:scale-95">
+                            ↺ Reset Edits
+                        </button>
+                    )}
+                    <button onClick={handleExportCSV} className="px-5 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95">
+                        📥 Export CSV
+                    </button>
+                </div>
+            </div>
+
+            {rows.length > 0 && (
+                <div className="mb-10 w-full h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={months.map(m => {
+                            const dataPoint: any = { name: monthNames[m], sales: revenueTotals[m] || 0 };
+                            allTerminals.forEach(t => {
+                                dataPoint[t] = scaledTerminalRev[t]?.[m] || 0;
+                            });
+                            return dataPoint;
+                        })} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f8fafc" />
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} dy={10} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} dx={-10} tickFormatter={(value) => value >= 1000 ? `${(value/1000).toFixed(0)}k` : value} />
+                            <Tooltip
+                                cursor={{ fill: '#f8fafc' }}
+                                contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
+                                itemStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '12px' }}
+                                formatter={(value: number, name: string) => [`Rs. ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, name === 'sales' ? 'ALL' : name]}
+                            />
+                            <Legend wrapperStyle={{ fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', bottom: -10 }} />
+                            <Line
+                                name="ALL"
+                                type="linear"
+                                dataKey="sales"
+                                stroke="#f97316"
+                                strokeWidth={4}
+                                dot={{ fill: '#ffffff', stroke: '#f97316', strokeWidth: 3, r: 5 }}
+                                activeDot={{ r: 7, fill: '#f97316', stroke: '#ffffff', strokeWidth: 3 }}
+                            />
+                            {allTerminals.includes('CASHIER 1') && (
+                                <Line
+                                    name="CASHIER 1"
+                                    type="linear"
+                                    dataKey="CASHIER 1"
+                                    stroke="#3b82f6"
+                                    strokeWidth={2}
+                                    dot={{ fill: '#ffffff', stroke: '#3b82f6', strokeWidth: 2, r: 4 }}
+                                />
+                            )}
+                            {allTerminals.includes('CASHIER 2') && (
+                                <Line
+                                    name="CASHIER 2"
+                                    type="linear"
+                                    dataKey="CASHIER 2"
+                                    stroke="#10b981"
+                                    strokeWidth={2}
+                                    dot={{ fill: '#ffffff', stroke: '#10b981', strokeWidth: 2, r: 4 }}
+                                />
+                            )}
+                            {allTerminals.includes('CASHIER 3') && (
+                                <Line
+                                    name="CASHIER 3"
+                                    type="linear"
+                                    dataKey="CASHIER 3"
+                                    stroke="#8b5cf6"
+                                    strokeWidth={2}
+                                    dot={{ fill: '#ffffff', stroke: '#8b5cf6', strokeWidth: 2, r: 4 }}
+                                />
+                            )}
+                            {allTerminals.includes('CASHIER 4') && (
+                                <Line
+                                    name="CASHIER 4"
+                                    type="linear"
+                                    dataKey="CASHIER 4"
+                                    stroke="#ec4899"
+                                    strokeWidth={2}
+                                    dot={{ fill: '#ffffff', stroke: '#ec4899', strokeWidth: 2, r: 4 }}
+                                />
+                            )}
+                            {allTerminals.filter(t => !['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].includes(t)).map((t, i) => {
+                                const colors = ['#06b6d4', '#eab308', '#ef4444', '#6366f1'];
+                                const color = colors[i % colors.length];
+                                return (
+                                    <Line
+                                        key={t}
+                                        name={t}
+                                        type="linear"
+                                        dataKey={t}
+                                        stroke={color}
+                                        strokeWidth={2}
+                                        dot={{ fill: '#ffffff', stroke: color, strokeWidth: 2, r: 4 }}
+                                    />
+                                );
+                            })}
+                        </ComposedChart>
+                    </ResponsiveContainer>
+                </div>
+            )}
+
+            {rows.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                    <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                            <tr className="bg-[#1e293b]">
+                                <th className="px-5 py-4 text-[10px] font-black text-white uppercase tracking-widest sticky left-0 bg-[#1e293b] z-10 min-w-[160px]">Category</th>
+                                {months.map(m => (
+                                    <th key={m} className="px-5 py-4 text-[10px] font-black text-white uppercase tracking-widest text-right min-w-[110px]">
+                                        {monthNames[m]}
+                                    </th>
+                                ))}
+                                <th className="px-5 py-4 text-[10px] font-black text-amber-300 uppercase tracking-widest text-right min-w-[120px] bg-[#0f172a]">Row Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            {rows.map((row, rowIdx) => {
+                                const adjustedRowTotal = months.reduce((sum, m) => sum + getCellValue(row.category, m, row.monthData[m] || 0), 0);
+                                return (
+                                    <tr key={row.category} className={`group hover:bg-indigo-50/30 transition-all ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                                        <td className="px-5 py-3 text-[11px] font-black text-slate-800 uppercase tracking-tight sticky left-0 bg-inherit z-10 border-r border-slate-100">
+                                            {row.category}
+                                        </td>
+                                        {months.map(m => {
+                                            const originalVal = row.monthData[m] || 0;
+                                            const cellVal = getCellValue(row.category, m, originalVal);
+                                            const cellKey = `${row.category}-${m}`;
+                                            const isEditing = editingCell === cellKey;
+                                            const isOverridden = editOverrides[cellKey] !== undefined;
+
+                                            if (isEditing) {
+                                                return (
+                                                    <td key={m} className="px-2 py-1 text-right">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={e => setEditValue(e.target.value)}
+                                                            onBlur={() => handleSaveEdit(row.category, m)}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') handleSaveEdit(row.category, m);
+                                                                if (e.key === 'Escape') handleCancelEdit();
+                                                            }}
+                                                            className="w-full px-2 py-1 text-right text-[11px] font-mono font-black border-2 border-indigo-500 rounded-lg outline-none bg-indigo-50 text-indigo-800"
+                                                        />
+                                                    </td>
+                                                );
+                                            }
+
+                                            return (
+                                                <td
+                                                    key={m}
+                                                    onClick={() => handleStartEdit(row.category, m, cellVal)}
+                                                    className={`px-5 py-3 text-right font-mono text-[11px] font-bold cursor-pointer transition-all hover:bg-indigo-100/50 ${
+                                                        cellVal === 0
+                                                            ? 'text-slate-200'
+                                                            : isOverridden
+                                                                ? 'text-indigo-700 bg-indigo-50/50'
+                                                                : 'text-slate-700'
+                                                    }`}
+                                                >
+                                                    {cellVal > 0 ? cellVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                                                </td>
+                                            );
+                                        })}
+                                        <td className="px-5 py-3 text-right font-mono text-[11px] font-black text-slate-900 bg-slate-50 border-l border-slate-200">
+                                            {adjustedRowTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                        <tfoot>
+                            <tr className="bg-[#0f172a]">
+                                <td className="px-5 py-4 text-[10px] font-black text-white uppercase tracking-widest sticky left-0 bg-[#0f172a] z-10 border-b border-slate-700/50">Grand Total</td>
+                                {months.map(m => (
+                                    <td key={m} className="px-5 py-4 text-right font-mono text-[11px] font-black text-emerald-300 border-b border-slate-700/50">
+                                        {columnTotals[m].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                ))}
+                                <td className="px-5 py-4 text-right font-mono text-[12px] font-black text-amber-300 bg-[#0f172a] border-l border-slate-700 border-b border-slate-700/50">
+                                    {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                            </tr>
+                            <tr className="bg-[#0f172a]">
+                                <td className="px-5 py-4 text-[10px] font-black text-white uppercase tracking-widest sticky left-0 bg-[#0f172a] z-10">Revenue</td>
+                                {months.map(m => (
+                                    <td key={m} className="px-5 py-4 text-right font-mono text-[11px] font-black text-indigo-300">
+                                        {revenueTotals[m].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                ))}
+                                <td className="px-5 py-4 text-right font-mono text-[12px] font-black text-indigo-400 bg-[#0f172a] border-l border-slate-700">
+                                    {grandRevenueTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                            </tr>
+                            <tr className="bg-[#0f172a]">
+                                <td className="px-5 py-4 text-[10px] font-black text-white uppercase tracking-widest sticky left-0 bg-[#0f172a] z-10">Profit</td>
+                                {months.map(m => (
+                                    <td key={m} className="px-5 py-4 text-right font-mono text-[11px] font-black text-emerald-300">
+                                        {profitTotals[m].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                ))}
+                                <td className="px-5 py-4 text-right font-mono text-[12px] font-black text-emerald-400 bg-[#0f172a] border-l border-slate-700">
+                                    {grandProfitTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            ) : (
+                <div className="h-[200px] flex flex-col items-center justify-center text-slate-300">
+                    <span className="text-4xl mb-2">📊</span>
+                    <p className="text-[10px] font-black uppercase tracking-widest">No sales data available for pivot analysis</p>
+                </div>
+            )}
+
+            {hasOverrides && (
+                <div className="mt-4 flex items-center gap-2 bg-amber-50 px-4 py-2 rounded-xl border border-amber-100">
+                    <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest">⚠️ {Object.keys(editOverrides).length} cell(s) have been manually edited</span>
+                </div>
+            )}
+        </div>
+    );
+};

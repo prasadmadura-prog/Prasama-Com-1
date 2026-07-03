@@ -32,3 +32,15 @@ export const formatDateTime = (date: string | Date | undefined | null): string =
 
     return `${dateStr} ${timeStr}`;
 };
+
+export const formatTime = (date: string | Date | undefined | null): string => {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '';
+
+    return d.toLocaleTimeString(LK_LOCALE, {
+        timeZone: LK_TZ,
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+};

@@ -63,6 +63,7 @@ const Purchases: React.FC<PurchasesProps> = ({
   const [poItems, setPoItems] = useState<PurchaseOrderItem[]>([]);
   const [poMainCategory, setPoMainCategory] = useState('');
   const [poCategory, setPoCategory] = useState('');
+  const [poBranchId, setPoBranchId] = useState(userProfile.branch);
 
   const [productSearch, setProductSearch] = useState('');
   const [selectedCatId, setSelectedCatId] = useState('All');
@@ -398,7 +399,7 @@ const Purchases: React.FC<PurchasesProps> = ({
         notes: poNotes,
         mainCategory: poMainCategory,
         category: poCategory,
-        branchId: userProfile.branch
+        branchId: poBranchId || userProfile.branch
       });
       setSyncStatus('SYNCED');
       closePOModal();
@@ -426,6 +427,7 @@ const Purchases: React.FC<PurchasesProps> = ({
       setPoItems(po.items);
       setPoMainCategory(po.mainCategory || '');
       setPoCategory(po.category || '');
+      setPoBranchId(po.branchId || userProfile.branch);
       setInModalSettleAmount('');
     } else {
       setSelectedPO(null);
@@ -439,6 +441,7 @@ const Purchases: React.FC<PurchasesProps> = ({
       setPoItems([]);
       setPoMainCategory('');
       setPoCategory('');
+      setPoBranchId(userProfile.branch);
       setInModalSettleAmount('');
     }
     setIsPOModalOpen(true);
@@ -1325,11 +1328,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                         className="w-full text-left py-2 px-4 bg-white border border-slate-100 rounded-xl hover:border-indigo-500 hover:shadow-sm transition-all group flex justify-between items-center"
                       >
                         <div className="min-w-0">
-                          <p className="text-[11px] font-black text-slate-900 uppercase truncate leading-tight">
-                            <span className="text-indigo-500 mr-1">[{getVendorName(p.vendorId)}]</span>
-                            {p.name}
-                          </p>
-                          <p className="text-[8px] font-bold text-slate-400 font-mono mt-0.5">{p.sku} | STOCK: {p.stock} | BUY: Rs. {p.cost.toLocaleString()}</p>
+                          <div className="flex flex-col">
+                            <p className="text-xs font-black text-slate-900 uppercase truncate leading-tight">
+                              {p.name}
+                            </p>
+                            <p className="text-[9px] font-bold text-indigo-500 uppercase truncate mt-0.5">
+                              {getVendorName(p.vendorId)}
+                            </p>
+                          </div>
+                          <p className="text-[9px] font-bold text-slate-400 font-mono mt-0.5">{p.sku} | STOCK: {p.stock} | BUY: Rs. {p.cost.toLocaleString()}</p>
                         </div>
                         <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">⊕</span>
                       </button>
@@ -1380,6 +1387,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                         <option value="CASH">Cash Drawer</option>
                         <option value="CREDIT">Supplier Credit</option>
                         <option value="CHEQUE">Corporate Cheque</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Cashier</label>
+                      <select value={poBranchId} onChange={e => setPoBranchId(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase">
+                        {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4', 'MAIN STORE']).map(b => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
                       </select>
                     </div>
 
@@ -1467,17 +1483,17 @@ const Purchases: React.FC<PurchasesProps> = ({
                     <div className="overflow-x-auto flex-1 custom-scrollbar">
                       <table className="w-full text-left border-collapse">
                         <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-100">
-                          <tr className="text-[9px] font-black uppercase text-slate-400 tracking-widest">
-                            <th className="px-6 py-4 w-12 text-center">#</th>
-                            <th className="px-6 py-4">Asset Description</th>
-                            <th className="px-6 py-4">SKU</th>
-                            <th className="px-2 py-4 min-w-[120px] text-right">Unit Cost (Rs.)</th>
-                            <th className="px-2 py-4 min-w-[100px] text-center">Qty</th>
-                            <th className="px-2 py-4 min-w-[100px] text-center">Free Iss.</th>
-                            <th className="px-6 py-4 w-24 text-right">Retail</th>
-                            <th className="px-6 py-4 w-24 text-right">Est. Profit</th>
-                            <th className="px-6 py-4 w-32 text-right">Subtotal</th>
-                            <th className="px-6 py-4 w-16 text-center">Action</th>
+                          <tr className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                            <th className="px-6 py-5 w-12 text-center">#</th>
+                            <th className="px-6 py-5">Asset Description</th>
+                            <th className="px-6 py-5">SKU</th>
+                            <th className="px-2 py-5 min-w-[110px] text-right">Unit Cost (Rs.)</th>
+                            <th className="px-2 py-5 min-w-[80px] text-center">Qty</th>
+                            <th className="px-2 py-5 min-w-[80px] text-center">Free Iss.</th>
+                            <th className="px-6 py-5 w-24 text-right">Retail</th>
+                            <th className="px-6 py-5 w-24 text-right">Est. Profit</th>
+                            <th className="px-6 py-5 w-32 text-right">Subtotal</th>
+                            <th className="px-6 py-5 w-16 text-center">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white/50">
@@ -1492,10 +1508,14 @@ const Purchases: React.FC<PurchasesProps> = ({
                               <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
                                 <td className="px-6 py-3 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
                                 <td className="px-6 py-3">
-                                  <p className="text-[11px] font-black text-slate-900 uppercase truncate max-w-[200px] leading-tight">
-                                    <span className="text-indigo-500 mr-1">[{getVendorName(product?.vendorId)}]</span>
-                                    {product?.name || item.productName || 'Unknown Asset'}
-                                  </p>
+                                  <div className="flex flex-col">
+                                    <p className="text-xs font-black text-slate-900 uppercase truncate max-w-[350px] leading-tight">
+                                      {product?.name || item.productName || 'Unknown Asset'}
+                                    </p>
+                                    <p className="text-[10px] font-bold text-indigo-500 uppercase truncate max-w-[350px] mt-0.5">
+                                      {getVendorName(product?.vendorId)}
+                                    </p>
+                                  </div>
                                 </td>
                                 <td className="px-6 py-3">
                                   <span className="text-[9px] font-black font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 uppercase tracking-tighter">

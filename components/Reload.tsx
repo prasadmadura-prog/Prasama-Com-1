@@ -55,6 +55,7 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
         const desc = txDescription.toUpperCase();
 
         if (cName.includes('CARD')) return false;
+        if (pName.includes('SIM') || cName.includes('SIM') || desc.includes('SIM')) return false;
 
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||

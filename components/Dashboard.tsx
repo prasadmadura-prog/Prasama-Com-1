@@ -60,7 +60,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       const matchDate = t && t.date && t.date.split('T')[0] === todayStr;
       const tBranch = normalizeBranch(t.branchId);
       const target = normalizeBranch(branchFilter);
-      return matchDate && (branchFilter === 'ALL' || tBranch === target);
+      const isValidStatus = t.status !== 'DRAFT' && t.status !== 'VOID';
+      return matchDate && (branchFilter === 'ALL' || tBranch === target) && isValidStatus;
     });
 
     const getTxCostBasis = (t: Transaction) => {
@@ -223,8 +224,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       // History imports without branch are allowed if generic, or if they match the filter
       const isHistory = t.type === 'SALE_HISTORY_IMPORT';
       const isMatch = targetFilter === 'ALL' || tBranch === targetFilter || (isHistory && !t.branchId);
+      const isValidStatus = t.status !== 'DRAFT' && t.status !== 'VOID';
 
-      if (isMatch && (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT')) {
+      if (isMatch && isValidStatus && (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT')) {
         const key = normalizeDateKey(t.date);
         if (key && dailyRevenueMap[key] !== undefined) {
           // Calculate revenue (excluding reload) and profit (including 4% reload)
@@ -270,7 +272,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const productMap: Record<string, { name: string, revenue: number, units: number, profit: number }> = {};
     const categoryMap: Record<string, { name: string, revenue: number, units: number }> = {};
 
-    transactions.filter(t => t && (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') && (branchFilter === 'ALL' || t.branchId === branchFilter)).forEach(tx => {
+    transactions.filter(t => t && (t.type === 'SALE' || t.type === 'SALE_HISTORY_IMPORT') && (branchFilter === 'ALL' || t.branchId === branchFilter) && t.status !== 'DRAFT' && t.status !== 'VOID').forEach(tx => {
       tx.items?.forEach(item => {
         const product = products.find(p => p.id === item.productId);
         if (!product) return;

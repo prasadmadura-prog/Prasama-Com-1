@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, BankAccount, Customer, Vendor, Product, Category, PurchaseOrder, UserProfile } from '../types';
+import { Transaction, BankAccount, Customer, Vendor, Product, Category, PurchaseOrder, UserProfile, FixedAsset } from '../types';
 import * as XLSX from 'xlsx';
 
 interface AccountingProps {
@@ -58,6 +58,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
         // If category is "RELOAD CARD", it's a physical item, not a hot reload
         if (cName.includes('CARD')) return false;
+        if (pName.includes('SIM') || cName.includes('SIM') || desc.includes('SIM')) return false;
 
         return cName.includes('RELOAD') ||
             pName.includes('RELOAD') ||
@@ -552,7 +553,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                                     className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-bold text-xs md:text-sm bg-white min-w-[140px]"
                                 >
                                     {userProfile.isAdmin && <option value="ALL CASHIERS">ALL CASHIERS</option>}
-                                    {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3']).map(branch => (
+                                    {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']).map(branch => (
                                         <option key={branch} value={branch}>{branch}</option>
                                     ))}
                                 </select>
