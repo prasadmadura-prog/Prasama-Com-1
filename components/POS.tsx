@@ -13,11 +13,12 @@ interface POSProps {
   transactions: Transaction[];
   userProfile: UserProfile;
   activeSession?: DaySession;
+  daySessions?: DaySession[];
   onUpsertCustomer: (c: Customer) => void;
   onUpdateProduct: (p: Product) => void;
-  onCompleteSale: (tx: any) => void;
+  onCompleteSale: (tx: any) => Promise<void> | void;
   onSaveDraftSale?: (tx: any) => Promise<string | void>;
-  onQuickOpenDay: (opening: number) => void;
+  onQuickOpenDay: (opening: number, branchId?: string) => void;
   posSession: POSSession;
   setPosSession: React.Dispatch<React.SetStateAction<POSSession>>;
   onGoToFinance: () => void;
@@ -31,6 +32,7 @@ const POS: React.FC<POSProps> = ({
   transactions = [],
   userProfile,
   activeSession,
+  daySessions = [],
   onUpsertCustomer,
   onUpdateProduct,
   onCompleteSale,
@@ -48,10 +50,8 @@ const POS: React.FC<POSProps> = ({
   const completedTxIdsRef = useRef<Set<string>>(new Set());
 
   const getAvailableStock = (product: Product) => {
-    if (product.branchStocks && Object.keys(product.branchStocks).length > 0) {
-      return product.branchStocks[activeTerminal] !== undefined
-        ? Number(product.branchStocks[activeTerminal])
-        : 0;
+    if (product.branchStocks && product.branchStocks[activeTerminal] !== undefined) {
+      return Number(product.branchStocks[activeTerminal]);
     }
     return Number(product.stock || 0);
   };
@@ -156,7 +156,8 @@ const POS: React.FC<POSProps> = ({
   const today = getTodayLocal();
 
   const dailySummary = useMemo(() => {
-    const todayEntries = (transactions || []).filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === today && t.status !== 'DRAFT' && t.status !== 'VOID');
+    const targetDate = txDate || today;
+    const todayEntries = (transactions || []).filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === targetDate && t.status !== 'DRAFT' && t.status !== 'VOID');
 
     const branchStats: Record<string, { revenue: number, profit: number, retailRevenue: number, retailProfit: number }> = {
       'CASHIER 1': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 },
@@ -248,7 +249,7 @@ const POS: React.FC<POSProps> = ({
     });
 
     return { realizedInflow, dueAmount, profit: globalProfit, reloadSales: totalReloadSales, branchBreakdown, branchStats };
-  }, [transactions, today, products, categories]);
+  }, [transactions, today, txDate, products, categories]);
 
   const quickAddItems = useMemo(() => {
     // 1. Gather all sales transactions (not draft, not void)
@@ -438,7 +439,14 @@ const POS: React.FC<POSProps> = ({
   }, [cart, discount, discountPercent, globalDiscountType, isAdvance, advanceAmount]);
 
   const changeDue = Math.max(0, (parseFloat(cashReceived) || 0) - (isAdvance ? advanceAmount : totals.finalTotal));
-  const isDayOpen = activeSession?.status === 'OPEN';
+  const isDayOpen = useMemo(() => {
+    const todayStr = getTodayLocal();
+    const session = (daySessions || []).find(s => s && s.date === todayStr && s.branchId === activeTerminal);
+    if (session) return session.status === 'OPEN';
+    if (activeSession && activeSession.status === 'OPEN') return true;
+    const anyTodayOpen = (daySessions || []).some(s => s && s.date === todayStr && s.status === 'OPEN');
+    return anyTodayOpen;
+  }, [daySessions, activeTerminal, activeSession]);
 
   const startAction = (action: () => void) => {
     action();
@@ -458,8 +466,14 @@ const POS: React.FC<POSProps> = ({
   // getAvailableStock is defined at the top of the component
 
   const addToCart = (product: Product) => {
-    const availableStock = getAvailableStock(product);
-    if (!isDayOpen || availableStock <= 0) return;
+    if (!isDayOpen) {
+      const balance = prompt(`Terminal session for ${activeTerminal} is not open for today.\nEnter Opening Float (Rs.) to open session and proceed:`, "0");
+      if (balance !== null) {
+        onQuickOpenDay(parseFloat(balance) || 0, activeTerminal);
+      } else {
+        return;
+      }
+    }
 
     setPosSession((prev: POSSession) => {
       // Generate transaction ID ONLY when cart is empty (new transaction starting)
@@ -470,7 +484,7 @@ const POS: React.FC<POSProps> = ({
 
       const existing = prev.cart.find((item: any) => item.product.id === product.id);
       if (existing) {
-        return { ...prev, cart: prev.cart.map((item: any) => item.product.id === product.id ? { ...item, qty: Math.min(item.qty + 1, availableStock) } : item) };
+        return { ...prev, cart: prev.cart.map((item: any) => item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item) };
       }
       return { ...prev, cart: [{ product, qty: 1, price: product.price, discount: 0, discountType: 'AMT' }, ...prev.cart] };
     });
@@ -485,8 +499,7 @@ const POS: React.FC<POSProps> = ({
         ...prev,
         cart: prev.cart.map((item: any) => {
           if (item.product.id === id) {
-            const availableStock = getAvailableStock(item.product);
-            return { ...item, qty: Math.min(newQty, availableStock) };
+            return { ...item, qty: newQty };
           }
           return item;
         })
@@ -627,7 +640,8 @@ const POS: React.FC<POSProps> = ({
     return () => clearTimeout(timer);
   }, [cart, discount, discountPercent, paymentMethod, accountId, posSession.selectedPOSCustomerId, currentDraftId, activeTerminal, onSaveDraftSale, globalDiscountType]);
 
-  const completeTransaction = (customerId?: string) => {
+  const completeTransaction = async (customerId?: string) => {
+    if (isProcessing) return;
     setIsProcessing(true);
     // MUST use the existing Draft ID to promote DRAFT → COMPLETED status
     const txId = currentDraftId || `TX-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
@@ -668,32 +682,37 @@ const POS: React.FC<POSProps> = ({
       })
     };
 
-    onCompleteSale(txPayload);
-    setLastTx({ ...txPayload, subtotal: totals.gross, total: totals.finalTotal, globalDiscount: totals.globalDiscountAmt });
+    try {
+      await onCompleteSale(txPayload);
+      setLastTx({ ...txPayload, subtotal: totals.gross, total: totals.finalTotal, globalDiscount: totals.globalDiscountAmt });
 
-    setPosSession({
-      cart: [],
-      discount: 0,
-      discountPercent: 0,
-      globalDiscountType: 'AMT',
-      paymentMethod: 'CASH',
-      accountId: 'cash',
-      search: '',
-      categoryId: 'All',
-      chequeNumber: '',
-      chequeDate: getTodayLocal(),
-      isAdvance: false,
-      advanceAmount: 0,
-      selectedPOSCustomerId: 'WALKING',
-      transactionId: undefined,
-      transactionDate: undefined
-    });
-    setCurrentDraftId(null); // Clear draft ID
-    setShowCustomerModal(false);
-    setShowCashModal(false);
-    setShowGlobalDiscountEdit(false);
-    setCashReceived('');
-    setIsProcessing(false);
+      setPosSession({
+        cart: [],
+        discount: 0,
+        discountPercent: 0,
+        globalDiscountType: 'AMT',
+        paymentMethod: 'CASH',
+        accountId: 'cash',
+        search: '',
+        categoryId: 'All',
+        chequeNumber: '',
+        chequeDate: getTodayLocal(),
+        isAdvance: false,
+        advanceAmount: 0,
+        selectedPOSCustomerId: 'WALKING',
+        transactionId: undefined,
+        transactionDate: undefined
+      });
+      setCurrentDraftId(null); // Clear draft ID
+      setShowCustomerModal(false);
+      setShowCashModal(false);
+      setShowGlobalDiscountEdit(false);
+      setCashReceived('');
+    } catch (err) {
+      console.error("Sale completion failed:", err);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleRegisterNewCustomer = () => {
@@ -866,9 +885,9 @@ const POS: React.FC<POSProps> = ({
         <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Terminal Offline</h2>
         <p className="text-slate-400 text-sm mt-1 mb-8">Daily cash balance must be initialized before processing sales.</p>
         <button onClick={() => {
-          const balance = prompt("Opening Float (Rs.):", "0");
-          if (balance !== null) onQuickOpenDay(parseFloat(balance) || 0);
-        }} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all">Initialize Float</button>
+          const balance = prompt(`Opening Float for ${activeTerminal} (Rs.):`, "0");
+          if (balance !== null) onQuickOpenDay(parseFloat(balance) || 0, activeTerminal);
+        }} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all">Initialize Float ({activeTerminal})</button>
       </div>
     );
   }
@@ -1193,7 +1212,7 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                   const isOut = availableStock <= 0;
                   const isLowStock = availableStock <= (p.lowStockThreshold || 0);
                   return (
-                    <tr key={p.id} className={`transition-all group ${isOut ? 'bg-rose-50/50 hover:bg-rose-50' : 'hover:bg-slate-50'}`}>
+                    <tr key={p.id} onClick={() => addToCart(p)} className={`transition-all group cursor-pointer ${isOut ? 'bg-amber-50/30 hover:bg-amber-100/60' : 'hover:bg-slate-50'}`}>
                       <td className="px-3 py-1 overflow-hidden leading-none">
                         <div className="flex items-center gap-2 overflow-hidden max-w-full">
                           {p.imageUrl ? (
@@ -1201,16 +1220,16 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                           ) : null}
                           <div className="flex flex-col gap-0.5 overflow-hidden max-w-full">
                             <div className="flex items-center gap-1.5 overflow-hidden">
-                              <p className={`font-black text-[10px] uppercase truncate shrink leading-tight ${isOut ? 'text-rose-600 font-extrabold' : 'text-slate-800'}`}>{p.name}</p>
+                              <p className={`font-black text-[10px] uppercase truncate shrink leading-tight ${isOut ? 'text-amber-700 font-extrabold' : 'text-slate-800'}`}>{p.name}</p>
                               <span className="text-slate-200 shrink-0 text-[8px]"> • </span>
-                              <p className={`text-[7px] font-mono font-bold uppercase truncate shrink-0 leading-tight ${isOut ? 'text-rose-400' : 'text-indigo-400 opacity-70'}`}>{p.sku}</p>
+                              <p className={`text-[7px] font-mono font-bold uppercase truncate shrink-0 leading-tight ${isOut ? 'text-amber-500' : 'text-indigo-400 opacity-70'}`}>{p.sku}</p>
                             </div>
                             {p.internalNotes && <p className="text-[6px] font-black text-rose-400 uppercase tracking-widest truncate">{p.internalNotes}</p>}
                           </div>
                         </div>
                       </td>
                       <td className="px-2 py-0.5 text-right whitespace-nowrap">
-                        <span className={`font-bold text-[10px] font-mono leading-none ${isOut ? 'text-rose-600' : 'text-slate-800'}`}>{Number(p.price).toLocaleString()}</span>
+                        <span className={`font-bold text-[10px] font-mono leading-none ${isOut ? 'text-amber-700' : 'text-slate-800'}`}>{Number(p.price).toLocaleString()}</span>
                       </td>
                       <td className={`px-1.5 py-0 text-center leading-none`}>
                         <div className={`inline-flex items-center gap-1 px-1 py-0.5 rounded border ${isOut
@@ -1225,11 +1244,11 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                       </td>
                       <td className="px-2 py-0.5 text-center">
                         <button
+                          type="button"
                           onClick={(e) => { e.stopPropagation(); addToCart(p); }}
-                          disabled={availableStock <= 0}
-                          title={isOut ? 'Out of Stock' : 'Add to Cart'}
+                          title={isOut ? 'Zero Stock (Click to Add)' : 'Add to Cart'}
                           className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-sm transition-all shadow-md ${isOut
-                            ? 'bg-rose-100 text-rose-400 border border-rose-200 cursor-not-allowed opacity-50'
+                            ? 'bg-amber-600 hover:bg-amber-700 text-white hover:scale-105 active:scale-95'
                             : 'bg-slate-900 text-white hover:bg-black hover:scale-105 active:scale-95'
                             }`}
                         >

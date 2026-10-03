@@ -382,60 +382,10 @@ const App: React.FC = () => {
         return;
       }
 
-      // FIX: Map pseudo 'LOCAL NODE' to real 'CASHIER 1' for consistency
+      // Map pseudo 'LOCAL NODE' to real 'CASHIER 1' for consistency
       const rawBranch = (tx.branchId || userProfile.branch || 'CASHIER 1').toUpperCase().trim();
       const activeBranch = (rawBranch === 'LOCAL NODE' || rawBranch === 'BOOKSHOP' || rawBranch === 'SHOP 2' || rawBranch === 'MAIN BRANCH' || !rawBranch) ? 'CASHIER 1' : rawBranch;
       const stockBranch = getStockBranch(activeBranch);
-
-      if (tx.items) {
-        for (const item of tx.items) {
-          const product = products.find(p => p.id === item.productId);
-          if (product) {
-            const bStocks = { ...(product.branchStocks || {}) };
-            const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-
-            // FIX: For Hot Reloads, deduct the COST VALUE (wallet balance) instead of quantity
-            let quantityToDeduct = Number(item.quantity);
-            const productCategory = categories.find(c => c.id === product.categoryId);
-            const categoryName = (productCategory?.name || '').toUpperCase();
-            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
-
-            if (isHotReload) {
-              // Deduct Cost (approx 96% of Price) from the Stock Balance
-              quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
-            }
-
-            const updatedStock = isHotReload ? (Number(currentStock) - quantityToDeduct) : Math.max(0, Number(currentStock) - quantityToDeduct);
-
-            bStocks[stockBranch] = updatedStock;
-
-            const updatedProduct = {
-              ...product,
-              branchStocks: bStocks,
-              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
-            };
-
-            setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
-            await upsertDocument(dbCols.products, product.id, updatedProduct);
-          }
-        }
-      }
-
-      // VITAL FIX: Account for balanceDue from advance payments in Credit Portfolio
-      const amountToChargeCustomer = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
-
-      if (amountToChargeCustomer !== 0 && tx.customerId) {
-        const customer = customers.find(c => c.id === tx.customerId);
-        if (customer) {
-          const updatedCustomer = {
-            ...customer,
-            totalCredit: (Number(customer.totalCredit) || 0) + amountToChargeCustomer
-          };
-          setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
-          await upsertDocument(dbCols.customers, customer.id, updatedCustomer);
-        }
-      }
-
 
       let costBasis = (tx.items || []).reduce((acc, item) => {
         const product = products.find(p => p.id === item.productId);
@@ -451,10 +401,11 @@ const App: React.FC = () => {
         return acc + (itemCost * Number(item.quantity));
       }, 0);
 
-      // FIX: Use provided costBasis if DB lookup yields zero (e.g. for Hot Reloads)
+      // Use provided costBasis if DB lookup yields zero (e.g. for Hot Reloads)
       if (costBasis === 0 && tx.costBasis && tx.costBasis > 0) {
         costBasis = tx.costBasis;
       }
+
       const normalizedTx = sanitizeData({
         ...tx,
         type: 'SALE' as const,
@@ -469,7 +420,7 @@ const App: React.FC = () => {
         accountId: tx.accountId || null
       });
 
-      // Optimistic update so UI reflects completion immediately
+      // 1. Optimistic update so UI reflects completion immediately
       setTransactions(prev => {
         const idx = prev.findIndex(t => t.id === tx.id);
         if (idx >= 0) {
@@ -480,10 +431,63 @@ const App: React.FC = () => {
         return [normalizedTx, ...prev];
       });
 
+      // 2. CRITICAL: Save transaction FIRST to guarantee the sale is recorded in Firestore
       await upsertDocument(dbCols.transactions, tx.id, normalizedTx);
 
-      const realizedInflow = Number(tx.paidAmount) || (tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
+      // 3. Prepare background side effects
+      const sideEffects: Promise<any>[] = [];
 
+      // A. Stock deduction
+      if (tx.items && tx.items.length > 0) {
+        for (const item of tx.items) {
+          const product = products.find(p => p.id === item.productId);
+          if (product) {
+            const bStocks = { ...(product.branchStocks || {}) };
+            const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
+
+            let quantityToDeduct = Number(item.quantity);
+            const productCategory = categories.find(c => c.id === product.categoryId);
+            const categoryName = (productCategory?.name || '').toUpperCase();
+            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+
+            if (isHotReload) {
+              quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
+            }
+
+            const updatedStock = isHotReload 
+              ? (Number(currentStock) - quantityToDeduct) 
+              : Math.max(0, Number(currentStock) - quantityToDeduct);
+
+            bStocks[stockBranch] = updatedStock;
+
+            const updatedProduct = {
+              ...product,
+              branchStocks: bStocks,
+              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
+            };
+
+            setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
+            sideEffects.push(upsertDocument(dbCols.products, product.id, updatedProduct));
+          }
+        }
+      }
+
+      // B. Customer Credit Portfolio
+      const amountToChargeCustomer = tx.paymentMethod === 'CREDIT' ? Number(tx.amount) : (Number(tx.balanceDue) || 0);
+      if (amountToChargeCustomer !== 0 && tx.customerId) {
+        const customer = customers.find(c => c.id === tx.customerId);
+        if (customer) {
+          const updatedCustomer = {
+            ...customer,
+            totalCredit: (Number(customer.totalCredit) || 0) + amountToChargeCustomer
+          };
+          setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
+          sideEffects.push(upsertDocument(dbCols.customers, customer.id, updatedCustomer));
+        }
+      }
+
+      // C. Account Inflow
+      const realizedInflow = Number(tx.paidAmount) || (tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
       if (realizedInflow > 0) {
         const acc = accounts.find(a => a.id === normalizedTx.accountId);
         if (acc) {
@@ -492,8 +496,13 @@ const App: React.FC = () => {
             balance: Number(acc.balance) + realizedInflow
           };
           setAccounts(prev => prev.map(a => a.id === acc.id ? updatedAcc : a));
-          await upsertDocument(dbCols.accounts, acc.id, updatedAcc);
+          sideEffects.push(upsertDocument(dbCols.accounts, acc.id, updatedAcc));
         }
+      }
+
+      // Execute side-effects concurrently
+      if (sideEffects.length > 0) {
+        await Promise.allSettled(sideEffects);
       }
 
     } catch (error) {
@@ -1578,7 +1587,11 @@ const App: React.FC = () => {
               onNavigate={setCurrentView}
             />
           )}
-          {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={transactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} onSaveDraftSale={handleSaveDraftSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
+          {currentView === 'POS' && <POS accounts={accounts} products={products} daySessions={daySessions} customers={customers} transactions={transactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} onSaveDraftSale={handleSaveDraftSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal, branchToOpen) => {
+            const targetBranch = branchToOpen || activeBranch;
+            const docId = `${getLocalDateString()}${targetBranch}`.replace(/[/.\s#$\[\]]/g, '_');
+            upsertDocument(dbCols.daySessions, docId, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: targetBranch, id: docId });
+          }} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
           {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} onConvertQuotation={handleConvertQuoteToSale} />}
           {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} purchaseOrders={purchaseOrders} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} onCompleteSale={handleCompleteSale} />}
           {currentView === 'INVENTORY' && <Inventory products={branchProducts} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = { id: `cat-${Date.now()}`, name: name.toUpperCase() }; upsertDocument(dbCols.categories, c.id, c); return c; }} onUpsertCategory={(cat) => upsertDocument(dbCols.categories, cat.id, cat)} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onBulkUpsertProducts={handleBulkUpsertProducts} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
