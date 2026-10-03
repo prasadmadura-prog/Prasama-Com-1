@@ -265,11 +265,13 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const filteredProducts = useMemo(() => {
-    return products
+    return (products || [])
       .filter(p => {
+        if (!p) return false;
         const matchesCategory = filterCategoryId === 'All' || p.categoryId === filterCategoryId;
-        const matchesSearch = (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
+        const sTerm = (searchTerm || '').toLowerCase();
+        const matchesSearch = (p.name || "").toLowerCase().includes(sTerm) ||
+          (p.sku || "").toLowerCase().includes(sTerm);
         
         // Filter by selected cashier's stock (> 0) if a specific cashier is selected
         const branchStock = p.branchStocks ? (Number(p.branchStocks[selectedBranch]) || 0) : (Number(p.stock) || 0);
@@ -277,7 +279,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
         return matchesCategory && matchesSearch && matchesBranch;
       })
-      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      .sort((a, b) => (a?.name || "").localeCompare(b?.name || ""));
   }, [products, filterCategoryId, searchTerm, selectedBranch]);
 
   const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
@@ -287,9 +289,10 @@ const Inventory: React.FC<InventoryProps> = ({
   }, [filteredProducts, currentPage]);
 
   const filteredCategories = useMemo(() => {
-    return categories
-      .filter(c => c.name.toLowerCase().includes(categorySearchTerm.toLowerCase()))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const sTerm = (categorySearchTerm || '').toLowerCase();
+    return (categories || [])
+      .filter(c => c && typeof c.name === 'string' && c.name.toLowerCase().includes(sTerm))
+      .sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
   }, [categories, categorySearchTerm]);
 
   const totalCategoryPages = Math.ceil(filteredCategories.length / ITEMS_PER_PAGE);
@@ -374,7 +377,7 @@ const Inventory: React.FC<InventoryProps> = ({
         const currentActiveBranch = userProfile.branch;
         const productsToUpsert: Product[] = importedItems.map((item, idx) => {
           let catId = item.category_id || item.category;
-          const foundCat = categories.find(c => c.name.toUpperCase() === String(catId || '').toUpperCase() || c.id === catId);
+          const foundCat = categories.find(c => c && ((c.name || '').toUpperCase() === String(catId || '').toUpperCase() || c.id === catId));
 
           if (!foundCat && catId) {
             catId = categories[0]?.id || 'uncategorized';
@@ -395,7 +398,7 @@ const Inventory: React.FC<InventoryProps> = ({
             branchStocks: bStocks,
             stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(bStocks[b]) || 0), 0),
             categoryId: catId,
-            vendorId: vendors.find(v => v.name.toUpperCase() === String(item['primary vendor'] || item.vendor || '').toUpperCase())?.id || item.vendor_id || '',
+            vendorId: vendors.find(v => v && (v.name || '').toUpperCase() === String(item['primary vendor'] || item.vendor || '').toUpperCase())?.id || item.vendor_id || '',
             lowStockThreshold: parseInt(item.alert_threshold || item.threshold) || 5,
             internalNotes: `Imported: ${new Date().toLocaleDateString()}`,
             extraDetails: item.extraDetails || item.extra_details || ''
