@@ -19,21 +19,30 @@ const FixedAssets: React.FC<FixedAssetsProps> = ({
     const [editingAsset, setEditingAsset] = useState<FixedAsset | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('ALL');
+    const [asAtDate, setAsAtDate] = useState<string>('');
+
+    const assetsAsOfDate = useMemo(() => {
+        if (!asAtDate) return assets;
+        return assets.filter(a => {
+            const pDate = a.purchaseDate.split('T')[0];
+            return pDate <= asAtDate;
+        });
+    }, [assets, asAtDate]);
 
     const categories = useMemo(() => {
-        const cats = new Set(assets.map(a => a.category).filter(Boolean));
+        const cats = new Set(assetsAsOfDate.map(a => a.category).filter(Boolean));
         return ['ALL', ...Array.from(cats)];
-    }, [assets]);
+    }, [assetsAsOfDate]);
 
-    const filteredAssets = assets.filter(a => {
+    const filteredAssets = assetsAsOfDate.filter(a => {
         const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                              (a.serialNumber || '').toLowerCase().includes(searchTerm.toLowerCase());
         const matchesCategory = categoryFilter === 'ALL' || a.category === categoryFilter;
         return matchesSearch && matchesCategory;
     });
 
-    const totalValue = assets.reduce((acc, a) => acc + Number(a.currentValue || 0), 0);
-    const totalPurchase = assets.reduce((acc, a) => acc + Number(a.purchasePrice || 0), 0);
+    const totalValue = assetsAsOfDate.reduce((acc, a) => acc + Number(a.currentValue || 0), 0);
+    const totalPurchase = assetsAsOfDate.reduce((acc, a) => acc + Number(a.purchasePrice || 0), 0);
 
     const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -87,14 +96,15 @@ const FixedAssets: React.FC<FixedAssetsProps> = ({
                 </div>
                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-lg transition-all">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Asset Count</p>
-                    <p className="text-2xl font-black text-indigo-600 font-mono">{assets.length}</p>
-                    <div className="mt-2 text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Total Active Items</div>
+                    <p className="text-2xl font-black text-indigo-600 font-mono">{assetsAsOfDate.length}</p>
+                    <div className="mt-2 text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Active Items as of Date</div>
                 </div>
             </div>
 
             {/* Filter Bar */}
-            <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
-                <div className="flex-1 relative">
+            <div className="flex flex-col md:flex-row gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm items-end">
+                <div className="flex-1 relative w-full">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2 block mb-1">Search</label>
                     <input
                         type="text"
                         placeholder="SEARCH ASSETS BY NAME OR SERIAL..."
@@ -103,13 +113,25 @@ const FixedAssets: React.FC<FixedAssetsProps> = ({
                         className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 text-[10px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500 outline-none"
                     />
                 </div>
-                <select
-                    value={categoryFilter}
-                    onChange={e => setCategoryFilter(e.target.value)}
-                    className="bg-slate-50 border-none rounded-2xl px-6 py-4 text-[10px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500 outline-none cursor-pointer min-w-[200px]"
-                >
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="min-w-[200px] w-full md:w-auto">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2 block mb-1">Category</label>
+                    <select
+                        value={categoryFilter}
+                        onChange={e => setCategoryFilter(e.target.value)}
+                        className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 text-[10px] font-bold uppercase tracking-widest focus:ring-2 ring-indigo-500 outline-none cursor-pointer"
+                    >
+                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                </div>
+                <div className="min-w-[200px] w-full md:w-auto">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2 block mb-1">As @ Date</label>
+                    <input
+                        type="date"
+                        value={asAtDate}
+                        onChange={e => setAsAtDate(e.target.value)}
+                        className="w-full bg-slate-50 border-none rounded-2xl px-6 py-4 text-[10px] font-bold focus:ring-2 ring-indigo-500 outline-none cursor-pointer"
+                    />
+                </div>
             </div>
 
             {/* Assets Table */}

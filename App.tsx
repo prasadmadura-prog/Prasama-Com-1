@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   subscribeToCollection,
+  subscribeToCollectionWithLimit,
   subscribeToDocument,
   upsertDocument,
   deleteDocument,
@@ -26,6 +27,8 @@ import KPI from './components/KPI';
 import Reload from './components/Reload';
 import UserControl from './components/UserControl';
 import FixedAssets from './components/FixedAssets';
+import AccountingLiabilities from './components/AccountingLiabilities';
+import Reports from './components/Reports';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +49,11 @@ const App: React.FC = () => {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [fixedAssets, setFixedAssets] = useState<FixedAsset[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+
+  const [transactionsLimit, setTransactionsLimit] = useState(100);
+  const [productsLimit, setProductsLimit] = useState(100);
+  const [customersLimit, setCustomersLimit] = useState(100);
+  const [purchaseOrdersLimit, setPurchaseOrdersLimit] = useState(100);
 
   const [userProfile, setUserProfile] = useState<UserProfile>({
     name: "PRASAMA ERP",
@@ -96,19 +104,56 @@ const App: React.FC = () => {
     advanceAmount: 0
   });
 
+  const chequeAlertCount = React.useMemo(() => {
+    const getOffset = (offsetDays = 0) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getOffset(0);
+    const tomorrowStr = getOffset(1);
+    let count = 0;
+
+    (transactions || []).forEach(t => {
+      if (t && t.paymentMethod === 'CHEQUE' && t.chequeDate) {
+        const cDate = t.chequeDate.split('T')[0];
+        if (cDate === tomorrowStr || cDate === todayStr) {
+          count++;
+        }
+      }
+    });
+
+    if (purchaseOrders) {
+      purchaseOrders.forEach(po => {
+        if (po && po.status === 'PENDING' && po.paymentMethod === 'CHEQUE') {
+          const cDate = po.chequeDate ? po.chequeDate.split('T')[0] : (typeof po.date === 'string' ? po.date.split('T')[0] : '');
+          if (cDate === tomorrowStr || cDate === todayStr) {
+            count++;
+          }
+        }
+      });
+    }
+
+    return count;
+  }, [transactions, purchaseOrders]);
+
   const sanitizeProfile = (profile: UserProfile): UserProfile => {
     let newProfile = { ...profile };
 
-    // ENFORCE CASHIER 2 FOR SPECIFIC USERS
     const emailLower = (newProfile.email || '').toLowerCase();
     const usernameLower = (newProfile.loginUsername || '').toLowerCase();
     if (emailLower === 'salesprasama@gmail.com' || usernameLower === 'salesprasama@gmail.com') {
       newProfile.isAdmin = true;
       newProfile.branch = 'CASHIER 1';
-    }
-
-    if (emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com') {
+    } else if (emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com') {
       newProfile.branch = 'CASHIER 2';
+    } else if (emailLower === 'prasadmadura@gmail.com' || usernameLower === 'prasadmadura@gmail.com') {
+      newProfile.isAdmin = true;
+      newProfile.branch = 'CASHIER 1';
     } else {
       // REPLACE 'LOCAL NODE' with 'CASHIER 1' - CASE INSENSITIVE
       const branchUpper = (newProfile.branch || '').toUpperCase();
@@ -123,12 +168,12 @@ const App: React.FC = () => {
         return (bUp === 'LOCAL NODE' || bUp === 'BOOKSHOP') ? 'CASHIER 1' : b;
       });
       // Ensure we have our core branches
-      if (newProfile.branch === 'CASHIER 2' || newProfile.isAdmin) {
+      if (newProfile.branch === 'CASHIER 2' || newProfile.branch === 'CASHIER 3' || newProfile.isAdmin) {
         if (!newProfile.allBranches.includes('CASHIER 1')) newProfile.allBranches.push('CASHIER 1');
       }
       if (!newProfile.allBranches.includes('CASHIER 2')) newProfile.allBranches.push('CASHIER 2');
       if (!newProfile.allBranches.includes('CASHIER 3')) newProfile.allBranches.push('CASHIER 3');
-      if (newProfile.isAdmin || emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com') {
+      if (newProfile.isAdmin || emailLower === 'madupathirana95@gmail.com' || usernameLower === 'madupathirana95@gmail.com' || emailLower === 'prasadmadura@gmail.com' || usernameLower === 'prasadmadura@gmail.com') {
         if (!newProfile.allBranches.includes('CASHIER 4')) newProfile.allBranches.push('CASHIER 4');
       }
       if (newProfile.isAdmin && !newProfile.allBranches.includes('ALL')) {
@@ -140,22 +185,41 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const savedProfile = localStorage.getItem('prasama_local_auth');
-    if (savedProfile) {
-      const p = JSON.parse(savedProfile);
-      const cleanProfile = sanitizeProfile(p);
+    try {
+      const savedProfile = localStorage.getItem('prasama_local_auth');
+      
+      // Check for view query parameter
+      const params = new URLSearchParams(window.location.search);
+      const viewParam = params.get('view');
+      const targetView = (viewParam && ['REPORTS', 'DASHBOARD', 'POS', 'SALES_HISTORY', 'INVENTORY', 'FIXED_ASSETS', 'ACCOUNTING', 'KPI', 'QUOTATIONS', 'PURCHASES', 'CUSTOMERS', 'FINANCE', 'RELOAD', 'CHEQUE_PRINT', 'BARCODE_PRINT', 'SETTINGS', 'USER_CONTROL', 'ACCOUNTING_LIABILITIES'].includes(viewParam.toUpperCase()))
+        ? (viewParam.toUpperCase() as View)
+        : 'DASHBOARD';
 
-      // If we modified it, save it back
-      if (JSON.stringify(p) !== JSON.stringify(cleanProfile)) {
-        localStorage.setItem('prasama_local_auth', JSON.stringify(cleanProfile));
+      if (savedProfile) {
+        const p = JSON.parse(savedProfile);
+        if (p && typeof p === 'object') {
+          const cleanProfile = sanitizeProfile(p);
+
+          // If we modified it, save it back
+          if (JSON.stringify(p) !== JSON.stringify(cleanProfile)) {
+            localStorage.setItem('prasama_local_auth', JSON.stringify(cleanProfile));
+          }
+
+          setUserProfile(cleanProfile);
+          setCurrentView(targetView);
+        } else {
+          setCurrentView('LOGIN');
+        }
+      } else {
+        setCurrentView('LOGIN');
       }
-
-      setUserProfile(cleanProfile);
-      setCurrentView('DASHBOARD');
-    } else {
+    } catch (err) {
+      console.error("Error reading saved auth profile:", err);
+      try { localStorage.removeItem('prasama_local_auth'); } catch (e) {}
       setCurrentView('LOGIN');
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
   useEffect(() => {
@@ -167,18 +231,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentView === 'LOGIN' || isLoading) return;
 
-    const unsubscribes = [
-      subscribeToCollection(dbCols.products, (data) => setProducts(data as Product[])),
-      subscribeToCollection(dbCols.categories, (data) => setCategories(data as Category[])),
-      subscribeToCollection(dbCols.transactions, (data) => setTransactions(data as Transaction[])),
-      subscribeToCollection(dbCols.accounts, (data) => setAccounts(data as BankAccount[])),
-      subscribeToCollection(dbCols.vendors, (data) => setVendors(data as Vendor[])),
-      subscribeToCollection(dbCols.customers, (data) => setCustomers(data as Customer[])),
-      subscribeToCollection(dbCols.recurringExpenses, (data) => setRecurringExpenses(data as RecurringExpense[])),
-      subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])),
-      subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[])),
-      subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])),
-      subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])),
+    const unsubscribes: (() => void)[] = [];
+
+    // 1. Profile is always subscribed
+    unsubscribes.push(
       subscribeToDocument(dbCols.profile, 'main', (data: any) => {
         if (data) {
           setUserProfile(prev => ({
@@ -195,10 +251,59 @@ const App: React.FC = () => {
           }));
         }
       })
-    ];
+    );
+
+    // 2. Load collections based on active view to optimize Firestore reads
+    const needsProducts = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'INVENTORY', 'FINANCE', 'CUSTOMERS', 'BARCODE_PRINT', 'REPORTS', 'PURCHASES', 'RELOAD', 'ACCOUNTING'].includes(currentView);
+    const needsCategories = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'INVENTORY', 'BARCODE_PRINT', 'PURCHASES', 'RELOAD', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
+    const needsTransactions = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'PURCHASES', 'RELOAD', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
+    const needsAccounts = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'PURCHASES', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
+    const needsVendors = ['DASHBOARD', 'KPI', 'INVENTORY', 'FINANCE', 'REPORTS', 'CHEQUE_PRINT', 'PURCHASES', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
+    const needsCustomers = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'RELOAD', 'ACCOUNTING'].includes(currentView);
+    const needsRecurringExpenses = ['FINANCE'].includes(currentView);
+    const needsDaySessions = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'ACCOUNTING'].includes(currentView);
+    const needsPurchaseOrders = ['DASHBOARD', 'KPI', 'SALES_HISTORY', 'PURCHASES', 'ACCOUNTING', 'CHEQUE_PRINT'].includes(currentView);
+    const needsQuotations = ['QUOTATIONS'].includes(currentView);
+    const needsFixedAssets = ['DASHBOARD', 'REPORTS', 'ACCOUNTING', 'FIXED_ASSETS'].includes(currentView);
+
+    if (needsProducts) {
+      unsubscribes.push(subscribeToCollection(dbCols.products, (data) => setProducts(data as Product[])));
+    }
+    if (needsCategories) {
+      unsubscribes.push(subscribeToCollection(dbCols.categories, (data) => setCategories(data as Category[])));
+    }
+    if (needsTransactions) {
+      unsubscribes.push(subscribeToCollection(dbCols.transactions, (data) => setTransactions(data as Transaction[])));
+    }
+    if (needsAccounts) {
+      unsubscribes.push(subscribeToCollection(dbCols.accounts, (data) => setAccounts(data as BankAccount[])));
+    }
+    if (needsVendors) {
+      unsubscribes.push(subscribeToCollection(dbCols.vendors, (data) => setVendors(data as Vendor[])));
+    }
+    if (needsCustomers) {
+      unsubscribes.push(subscribeToCollection(dbCols.customers, (data) => setCustomers(data as Customer[])));
+    }
+    if (needsRecurringExpenses) {
+      unsubscribes.push(subscribeToCollection(dbCols.recurringExpenses, (data) => setRecurringExpenses(data as RecurringExpense[])));
+    }
+    if (needsDaySessions) {
+      unsubscribes.push(subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])));
+    }
+    if (needsPurchaseOrders) {
+      unsubscribes.push(
+        subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[]))
+      );
+    }
+    if (needsQuotations) {
+      unsubscribes.push(subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])));
+    }
+    if (needsFixedAssets) {
+      unsubscribes.push(subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])));
+    }
 
     return () => unsubscribes.forEach(unsub => unsub());
-  }, [currentView, isLoading]);
+  }, [currentView, isLoading, transactionsLimit, productsLimit, customersLimit, purchaseOrdersLimit]);
 
   const handleLogout = () => {
     localStorage.removeItem('prasama_local_auth');
@@ -209,7 +314,15 @@ const App: React.FC = () => {
     const cleanProfile = sanitizeProfile(profile);
     localStorage.setItem('prasama_local_auth', JSON.stringify(cleanProfile));
     setUserProfile(cleanProfile);
-    setCurrentView('DASHBOARD');
+    
+    // Check for view query parameter
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get('view');
+    if (viewParam && ['REPORTS', 'DASHBOARD', 'POS', 'SALES_HISTORY', 'INVENTORY', 'FIXED_ASSETS', 'ACCOUNTING', 'KPI', 'QUOTATIONS', 'PURCHASES', 'CUSTOMERS', 'FINANCE', 'RELOAD', 'CHEQUE_PRINT', 'BARCODE_PRINT', 'SETTINGS', 'USER_CONTROL', 'ACCOUNTING_LIABILITIES'].includes(viewParam.toUpperCase())) {
+      setCurrentView(viewParam.toUpperCase() as View);
+    } else {
+      setCurrentView('DASHBOARD');
+    }
   };
 
   const handleSaveDraftSale = async (partialTx: any) => {
@@ -218,6 +331,12 @@ const App: React.FC = () => {
 
     // Use provided ID or generate
     const txId = partialTx.id || `TX-${Date.now()}`;
+
+    // NEVER overwrite an already completed transaction with DRAFT
+    const existing = transactions.find(t => t.id === txId);
+    if (existing && existing.status === 'COMPLETED') {
+      return;
+    }
 
     let costBasis = (partialTx.items || []).reduce((acc: number, item: any) => {
       const product = products.find(p => p.id === item.productId);
@@ -290,11 +409,14 @@ const App: React.FC = () => {
 
             bStocks[stockBranch] = updatedStock;
 
-            await upsertDocument(dbCols.products, product.id, {
+            const updatedProduct = {
               ...product,
               branchStocks: bStocks,
               stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
-            });
+            };
+
+            setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
+            await upsertDocument(dbCols.products, product.id, updatedProduct);
           }
         }
       }
@@ -305,10 +427,12 @@ const App: React.FC = () => {
       if (amountToChargeCustomer !== 0 && tx.customerId) {
         const customer = customers.find(c => c.id === tx.customerId);
         if (customer) {
-          await upsertDocument(dbCols.customers, customer.id, {
+          const updatedCustomer = {
             ...customer,
             totalCredit: (Number(customer.totalCredit) || 0) + amountToChargeCustomer
-          });
+          };
+          setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
+          await upsertDocument(dbCols.customers, customer.id, updatedCustomer);
         }
       }
 
@@ -345,6 +469,17 @@ const App: React.FC = () => {
         accountId: tx.accountId || null
       });
 
+      // Optimistic update so UI reflects completion immediately
+      setTransactions(prev => {
+        const idx = prev.findIndex(t => t.id === tx.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = normalizedTx;
+          return next;
+        }
+        return [normalizedTx, ...prev];
+      });
+
       await upsertDocument(dbCols.transactions, tx.id, normalizedTx);
 
       const realizedInflow = Number(tx.paidAmount) || (tx.paymentMethod !== 'CREDIT' ? Number(tx.amount) : 0);
@@ -352,16 +487,19 @@ const App: React.FC = () => {
       if (realizedInflow > 0) {
         const acc = accounts.find(a => a.id === normalizedTx.accountId);
         if (acc) {
-          await upsertDocument(dbCols.accounts, acc.id, {
+          const updatedAcc = {
             ...acc,
             balance: Number(acc.balance) + realizedInflow
-          });
+          };
+          setAccounts(prev => prev.map(a => a.id === acc.id ? updatedAcc : a));
+          await upsertDocument(dbCols.accounts, acc.id, updatedAcc);
         }
       }
 
     } catch (error) {
       console.error("TRANSACTION_FAILED:", error);
-      alert(`A critical error occurred while saving the sale: ${error instanceof Error ? error.message : String(error)}`);
+      alert(`Error completing sale: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
   };
 
@@ -686,6 +824,27 @@ const App: React.FC = () => {
       }
     }
 
+    if (tx.type === 'JOURNAL') {
+      if (tx.destinationAccountId) {
+        const debitAcc = accounts.find(a => a.id === tx.destinationAccountId);
+        if (debitAcc) {
+          await upsertDocument(dbCols.accounts, debitAcc.id, {
+            ...debitAcc,
+            balance: Number(debitAcc.balance) - Number(tx.amount)
+          });
+        }
+      }
+      if (tx.accountId) {
+        const creditAcc = accounts.find(a => a.id === tx.accountId);
+        if (creditAcc) {
+          await upsertDocument(dbCols.accounts, creditAcc.id, {
+            ...creditAcc,
+            balance: Number(creditAcc.balance) + Number(tx.amount)
+          });
+        }
+      }
+    }
+
     // 4. Restore/Deduct Stock
     if (tx.type === 'SALE' && tx.items) {
       const activeBranch = userProfile.branch;
@@ -859,7 +1018,7 @@ const App: React.FC = () => {
     };
     await upsertDocument(dbCols.purchaseOrders, po.id, updatedPO);
 
-    const activeBranch = userProfile.branch;
+    const activeBranch = po.branchId || userProfile.branch;
     const stockBranch = getStockBranch(activeBranch);
 
     for (const item of po.items) {
@@ -891,7 +1050,11 @@ const App: React.FC = () => {
       description: `Stock Received against PO: ${po.id}`,
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate,
-      mainCategory: po.mainCategory,
+      chequeNumber2: po.chequeNumber2,
+      chequeDate2: po.chequeDate2,
+      chequeAmount1: po.chequeAmount1,
+      chequeAmount2: po.chequeAmount2,
+      mainCategory: 'PURCHASE',
       category: po.category,
       updatedAt: new Date().toISOString()
     });
@@ -916,6 +1079,80 @@ const App: React.FC = () => {
   const handleUpsertPO = async (po: PurchaseOrder) => {
     const oldPO = purchaseOrders.find(p => p.id === po.id);
     await upsertDocument(dbCols.purchaseOrders, po.id, po);
+
+    // Sync cheques to futureCheques register if paymentMethod is CHEQUE
+    if (po.paymentMethod === 'CHEQUE') {
+      const vendorId = po.vendorId || oldPO?.vendorId;
+      const vendor = vendors.find(v => v.id === vendorId);
+      const payeeName = vendor?.name || 'VENDOR PAYEE';
+
+      const allCheques: { number: string; date: string; amount?: number }[] = [];
+      if (po.cheques && po.cheques.length > 0) {
+        po.cheques.forEach(c => {
+          if (c.chequeNumber?.trim()) {
+            allCheques.push({
+              number: c.chequeNumber.toUpperCase().trim(),
+              date: c.chequeDate || (typeof po.date === 'string' ? po.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+              amount: c.amount !== undefined ? Number(c.amount) : undefined
+            });
+          }
+        });
+      } else {
+        if (po.chequeNumber?.trim()) {
+          allCheques.push({
+            number: po.chequeNumber.toUpperCase().trim(),
+            date: po.chequeDate || (typeof po.date === 'string' ? po.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+            amount: po.chequeAmount1 !== undefined ? Number(po.chequeAmount1) : Number(po.totalAmount)
+          });
+        }
+        if (po.chequeNumber2?.trim()) {
+          allCheques.push({
+            number: po.chequeNumber2.toUpperCase().trim(),
+            date: po.chequeDate2 || (typeof po.date === 'string' ? po.date.split('T')[0] : new Date().toISOString().split('T')[0]),
+            amount: po.chequeAmount2 !== undefined ? Number(po.chequeAmount2) : 0
+          });
+        }
+      }
+
+      const poTotal = Number(po.totalAmount) || 0;
+      allCheques.forEach((chq, idx) => {
+        const sumOthers = allCheques.reduce((s, c, i) => i !== idx ? s + (c.amount || 0) : s, 0);
+        const remainingForFinal = Math.max(0, Math.round((poTotal - sumOthers) * 100) / 100);
+        const resolvedAmount = (chq.amount !== undefined && !isNaN(chq.amount) && chq.amount > 0)
+          ? chq.amount
+          : (idx === allCheques.length - 1 ? remainingForFinal : (idx === 0 ? poTotal : 0));
+
+        const chequeDoc = {
+          id: `fc-${chq.number}`,
+          chequeNumber: chq.number,
+          date: chq.date,
+          amount: resolvedAmount,
+          payee: payeeName,
+          status: 'future_release',
+          notes: `PO Ref (Chq ${idx + 1}): ${po.id}`,
+          createdAt: new Date().toISOString()
+        };
+        upsertDocument(dbCols.futureCheques, chequeDoc.id, chequeDoc).catch(() => {});
+      });
+
+      // Cleanup any removed cheques from oldPO
+      if (oldPO && oldPO.cheques) {
+        const currentNums = new Set(allCheques.map(c => c.number));
+        oldPO.cheques.forEach(oldC => {
+          const oldNum = oldC.chequeNumber?.toUpperCase().trim();
+          if (oldNum && !currentNums.has(oldNum)) {
+            deleteDocument(dbCols.futureCheques, `fc-${oldNum}`).catch(() => {});
+          }
+        });
+      }
+    } else if (oldPO && oldPO.paymentMethod === 'CHEQUE' && oldPO.cheques) {
+      oldPO.cheques.forEach(oldC => {
+        const oldNum = oldC.chequeNumber?.toUpperCase().trim();
+        if (oldNum) {
+          deleteDocument(dbCols.futureCheques, `fc-${oldNum}`).catch(() => {});
+        }
+      });
+    }
 
     // Manage Balance Impact of PO commitment
     // FIX: Updates balance if PO was CREDIT or becomes CREDIT (Correct Ledger Logic)
@@ -1075,6 +1312,43 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddJournalEntry = async (tx: any) => {
+    try {
+      const txId = `JE-${Date.now()}`;
+      const finalTx = sanitizeData({
+        ...tx,
+        id: txId,
+        type: 'JOURNAL',
+        date: tx.date || (getLocalDateString() + 'T12:00:00'),
+        branchId: tx.branchId || userProfile.branch,
+        updatedAt: new Date().toISOString()
+      });
+
+      await upsertDocument(dbCols.transactions, txId, finalTx);
+
+      // Debit account (t.destinationAccountId) balance increases
+      if (tx.destinationAccountId) {
+        const debitAcc = accounts.find(a => a.id === tx.destinationAccountId);
+        if (debitAcc) {
+          const newBalance = Number(debitAcc.balance) + Number(tx.amount);
+          await upsertDocument(dbCols.accounts, debitAcc.id, { ...debitAcc, balance: newBalance });
+        }
+      }
+
+      // Credit account (t.accountId) balance decreases
+      if (tx.accountId) {
+        const creditAcc = accounts.find(a => a.id === tx.accountId);
+        if (creditAcc) {
+          const newBalance = Number(creditAcc.balance) - Number(tx.amount);
+          await upsertDocument(dbCols.accounts, creditAcc.id, { ...creditAcc, balance: newBalance });
+        }
+      }
+    } catch (error) {
+      console.error("JOURNAL_ENTRY_FAILED:", error);
+      alert("Failed to record journal entry. Please try again.");
+    }
+  };
+
   const handleExport = () => {
     const data = {
       products, categories, transactions, accounts, vendors, customers,
@@ -1174,16 +1448,17 @@ const App: React.FC = () => {
     await deleteDocument(dbCols.accounts, id);
   };
 
-  const activeBranch = userProfile.branch;
-  const filteredDaySessions = activeBranch === 'ALL' ? daySessions : daySessions.filter(s => s.branchId === activeBranch);
-  const branchDaySession = filteredDaySessions.find(s => s.date === getLocalDateString());
+  const activeBranch = userProfile?.branch || 'CASHIER 1';
+  const filteredDaySessions = (daySessions || []).filter(s => s && (activeBranch === 'ALL' || s.branchId === activeBranch));
+  const branchDaySession = filteredDaySessions.find(s => s && s.date === getLocalDateString());
 
-  const branchProducts = products.map(p => {
+  const branchProducts = (products || []).filter(Boolean).map(p => {
+    if (!p) return p;
     const stockBranch = getStockBranch(activeBranch);
     if (activeBranch !== 'ALL' && p.branchStocks && p.branchStocks[stockBranch] !== undefined) {
       return { ...p, stock: p.branchStocks[stockBranch] };
     }
-    return { ...p, stock: p.stock }; // Default to global sum or master stock
+    return { ...p, stock: p.stock ?? 0 };
   });
   if (isLoading || isRestoring) {
     return (
@@ -1249,6 +1524,7 @@ const App: React.FC = () => {
         userProfile={userProfile}
         onEditProfile={() => setCurrentView('SETTINGS')}
         onLogout={handleLogout}
+        chequeAlertCount={chequeAlertCount}
         onSwitchBranch={(b) => {
           const updated = { ...userProfile, branch: b };
           setUserProfile(updated);
@@ -1256,6 +1532,20 @@ const App: React.FC = () => {
         }}
       />
       <main className="flex-1 overflow-y-auto bg-[#fcfcfc]">
+        {chequeAlertCount > 0 && currentView !== 'DASHBOARD' && (
+          <div className="bg-gradient-to-r from-amber-500 via-indigo-600 to-indigo-700 text-white px-6 py-2.5 shadow-md flex items-center justify-between text-xs font-black uppercase tracking-wider">
+            <div className="flex items-center gap-3">
+              <span className="animate-bounce">🔔</span>
+              <span>Cheque Alert: {chequeAlertCount} cheque(s) maturing today / tomorrow at the bank!</span>
+            </div>
+            <button
+              onClick={() => setCurrentView('DASHBOARD')}
+              className="px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors text-[10px]"
+            >
+              View Details →
+            </button>
+          </div>
+        )}
         <div className={`${currentView === 'POS' ? 'max-w-[1920px] mx-auto px-4 py-4' : 'max-w-7xl mx-auto px-6 py-8 md:px-10 md:py-12'} transition-all`}>
           {currentView === 'DASHBOARD' && (
             <Dashboard
@@ -1290,20 +1580,44 @@ const App: React.FC = () => {
           )}
           {currentView === 'POS' && <POS accounts={accounts} products={branchProducts} customers={customers} transactions={transactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} onSaveDraftSale={handleSaveDraftSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
           {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} onConvertQuotation={handleConvertQuoteToSale} />}
-          {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} purchaseOrders={purchaseOrders} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} />}
+          {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} purchaseOrders={purchaseOrders} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} onCompleteSale={handleCompleteSale} />}
           {currentView === 'INVENTORY' && <Inventory products={branchProducts} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = { id: `cat-${Date.now()}`, name: name.toUpperCase() }; upsertDocument(dbCols.categories, c.id, c); return c; }} onUpsertCategory={(cat) => upsertDocument(dbCols.categories, cat.id, cat)} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onBulkUpsertProducts={handleBulkUpsertProducts} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
           {
-            currentView === 'FINANCE' && <Finance accounts={accounts} transactions={transactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} customers={customers} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={handleAddExpense} onAddTransfer={handleAddTransfer}
+             currentView === 'FINANCE' && <Finance accounts={accounts} transactions={transactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} customers={customers} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={handleAddExpense} onAddTransfer={handleAddTransfer} onAddJournalEntry={handleAddJournalEntry}
               onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} onDeleteAccount={handleDeleteAccount} onResumeDraft={handleResumeDraft} onJumpTo={handleJumpTo} />
           }
           {currentView === 'CUSTOMERS' && <Customers jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} customers={customers} transactions={transactions} accounts={accounts} products={products} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onReceivePayment={handleCustomerPayment} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} />}
 
           {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} onResyncBalances={handleResyncBalances} syncStatus="OFFLINE" />}
           {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
-          {currentView === 'CHEQUE_PRINT' && <ChequePrint vendors={vendors} />}
+          {currentView === 'REPORTS' && (
+            <Reports
+              transactions={transactions}
+              products={products}
+              vendors={vendors}
+              customers={customers}
+              userProfile={userProfile}
+              accounts={accounts}
+              fixedAssets={fixedAssets}
+            />
+          )}
+          {currentView === 'CHEQUE_PRINT' && <ChequePrint vendors={vendors} purchaseOrders={purchaseOrders} />}
           {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={handleUpsertPO} onReceivePO={handleReceivePO} onDeletePO={handleDeletePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResyncBalances={handleResyncBalances} />}
           {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
-          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} fixedAssets={fixedAssets} userProfile={userProfile} />}
+          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} fixedAssets={fixedAssets} userProfile={userProfile} daySessions={daySessions} />}
+          {currentView === 'ACCOUNTING_LIABILITIES' && (
+            <AccountingLiabilities
+              accounts={accounts}
+              transactions={transactions}
+              vendors={vendors}
+              categories={categories}
+              userProfile={userProfile}
+              onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)}
+              onDeleteAccount={handleDeleteAccount}
+              onAddTransaction={handleAddExpense}
+              onDeleteTransaction={handleDeleteGlobalTransaction}
+            />
+          )}
           {currentView === 'USER_CONTROL' && <UserControl userProfile={userProfile} />}
           {currentView === 'FIXED_ASSETS' && <FixedAssets assets={fixedAssets} userProfile={userProfile} onUpsertAsset={(a) => upsertDocument(dbCols.fixedAssets, a.id, a)} onDeleteAsset={(id) => deleteDocument(dbCols.fixedAssets, id)} />}
 

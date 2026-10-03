@@ -25,12 +25,16 @@ interface FinanceProps {
    onDeleteAccount: (id: string) => void;
    onResumeDraft: (tx: Transaction) => void;
    onJumpTo?: (type: 'PO' | 'CUSTOMER' | 'VENDOR' | 'SALE', id: string) => void;
+   onLoadMore?: () => void;
+   hasMore?: boolean;
+   onAddJournalEntry?: (tx: any) => void;
 }
 
 const Finance: React.FC<FinanceProps> = ({
    accounts = [], transactions = [], daySessions = [], products = [], vendors = [], recurringExpenses = [], customers = [], userProfile,
    onOpenDay, onCloseDay, onAddExpense, onAddTransfer, onUpdateTransaction, onDeleteTransaction,
-   onAddRecurring, onDeleteRecurring, onUpsertAccount, onDeleteAccount, onResumeDraft, onJumpTo
+   onAddRecurring, onDeleteRecurring, onUpsertAccount, onDeleteAccount, onResumeDraft, onJumpTo,
+   onLoadMore, hasMore = false, onAddJournalEntry
 }) => {
    const getTodayLocal = () => {
       const d = new Date();
@@ -43,11 +47,22 @@ const Finance: React.FC<FinanceProps> = ({
    const currentSession = daySessions.find(s => s.date === today && (s.branchId === drawerBranch || (!s.branchId && drawerBranch === userProfile.branch)));
    const dayTransactions = transactions.filter(t => t && typeof t.date === 'string' && t.date.split('T')[0] === today);
 
-   // Modals State
-   const [showExpenseModal, setShowExpenseModal] = useState(false);
-   const [showTransferModal, setShowTransferModal] = useState(false);
-   const [showAccountsModal, setShowAccountsModal] = useState(false);
-   const [showRecurringModal, setShowRecurringModal] = useState(false);
+    // Modals State
+    const [showExpenseModal, setShowExpenseModal] = useState(false);
+    const [showTransferModal, setShowTransferModal] = useState(false);
+    const [showAccountsModal, setShowAccountsModal] = useState(false);
+    const [showRecurringModal, setShowRecurringModal] = useState(false);
+    const [showJournalModal, setShowJournalModal] = useState(false);
+
+    // Journal Entry Form States
+    const [journalDebit, setJournalDebit] = useState('Operating Expenses');
+    const [journalCredit, setJournalCredit] = useState('Owner Equity / Retained Earnings');
+    const [journalDebitAccountId, setJournalDebitAccountId] = useState('cash');
+    const [journalCreditAccountId, setJournalCreditAccountId] = useState('cash');
+    const [journalAmount, setJournalAmount] = useState('');
+    const [journalDesc, setJournalDesc] = useState('');
+    const [journalDate, setJournalDate] = useState(today);
+    const [journalBranch, setJournalBranch] = useState(userProfile.branch);
 
    // Edit State
    const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -156,7 +171,7 @@ const Finance: React.FC<FinanceProps> = ({
          .filter(t => (t.type === 'EXPENSE' || t.type === 'PURCHASE' || (t.type === 'TRANSFER' && t.accountId === 'cash')) && t.paymentMethod === 'CASH')
          .reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
 
-      const opening = Number(currentSession?.openingBalance) || 0;
+      const opening = 0;
       const expectedCash = opening + cashIn - cashOut;
 
       return { cashIn, cashOut, expectedCash };
@@ -190,7 +205,11 @@ const Finance: React.FC<FinanceProps> = ({
          ? (expDesc || `LOAN GIVEN TO ${customers.find(c => c.id === expCustomerId)?.name || 'CUSTOMER'}`).toUpperCase()
          : expDesc.toUpperCase();
 
-      const finalType = expIsLoan ? 'LOAN_GIVEN' : 'EXPENSE';
+      const finalType = expIsLoan
+         ? 'LOAN_GIVEN'
+         : (editingTransaction && ['PURCHASE', 'TRANSFER', 'CREDIT_PAYMENT'].includes(editingTransaction.type)
+            ? editingTransaction.type
+            : 'EXPENSE');
 
       if (editingTransaction) {
          onUpdateTransaction({
@@ -249,6 +268,37 @@ const Finance: React.FC<FinanceProps> = ({
       setShowTransferModal(false);
    };
 
+   const handleJournalSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!journalAmount || parseFloat(journalAmount) <= 0) {
+         alert("Please enter a valid amount.");
+         return;
+      }
+      if (journalDebit === journalCredit) {
+         alert("Debit and Credit accounts cannot be the same.");
+         return;
+      }
+
+      const isDebitCashOrBank = journalDebit === 'Cash / Bank' || journalDebit === 'Director C/A';
+      const isCreditCashOrBank = journalCredit === 'Cash / Bank' || journalCredit === 'Director C/A';
+
+      onAddJournalEntry?.({
+         amount: parseFloat(journalAmount),
+         description: journalDesc || `Manual Journal: ${journalDebit} (Dr) / ${journalCredit} (Cr)`,
+         date: journalDate + 'T12:00:00',
+         branchId: journalBranch,
+         category: journalDebit,
+         mainCategory: journalCredit,
+         destinationAccountId: isDebitCashOrBank ? journalDebitAccountId : null,
+         accountId: isCreditCashOrBank ? journalCreditAccountId : null,
+         paymentMethod: (isDebitCashOrBank || isCreditCashOrBank) ? 'CASH' : 'CREDIT'
+      });
+
+      setJournalAmount('');
+      setJournalDesc('');
+      setShowJournalModal(false);
+   };
+
    const handleAccountSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (!accName) return;
@@ -298,7 +348,7 @@ const Finance: React.FC<FinanceProps> = ({
             'REFERENCE ID': t.id,
             'DATE & TIME': formatDateTime(t.date),
             'TYPE': t.type,
-            'MAIN CATEGORY': t.mainCategory || 'N/A',
+            'MAIN CATEGORY': t.type === 'PURCHASE' ? 'PURCHASE' : (t.mainCategory || 'N/A'),
             'SUB CATEGORY': t.category || 'N/A',
             'DESCRIPTION': t.description,
             'SOURCE NODE': sourceName,
@@ -428,6 +478,18 @@ const Finance: React.FC<FinanceProps> = ({
                   setExpBranch(userProfile.branch);
                   setShowExpenseModal(true);
                }} className="bg-rose-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-200">Record Expense</button>
+
+               <button onClick={() => {
+                  setJournalDebit('Operating Expenses');
+                  setJournalCredit('Owner Equity / Retained Earnings');
+                  setJournalDebitAccountId('cash');
+                  setJournalCreditAccountId('cash');
+                  setJournalAmount('');
+                  setJournalDesc('');
+                  setJournalDate(today);
+                  setJournalBranch(userProfile.branch);
+                  setShowJournalModal(true);
+               }} className="bg-indigo-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-950 transition-all shadow-xl shadow-indigo-200">Journal Entry</button>
 
                <div className="w-px h-10 bg-slate-200 mx-2 hidden md:block"></div>
 
@@ -571,38 +633,48 @@ const Finance: React.FC<FinanceProps> = ({
                                  ? 'bg-emerald-50 text-emerald-600'
                                  : t.type === 'TRANSFER'
                                     ? 'bg-indigo-50 text-indigo-600'
-                                    : 'bg-rose-50 text-rose-600'
+                                    : t.type === 'JOURNAL'
+                                       ? 'bg-indigo-900 text-white'
+                                       : 'bg-rose-50 text-rose-600'
                                  }`}>{t.type === 'EXPENSE' && t.mainCategory ? `${t.mainCategory}` : t.type}</span>
                            </td>
                            <td className="px-3 py-2 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                 <span className="text-[12px]">{t.accountId === 'cash' ? '💵' : '🏦'}</span>
+                                 <span className="text-[12px]">{t.type === 'JOURNAL' ? '📓' : (t.accountId === 'cash' ? '💵' : '🏦')}</span>
                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                                    {accounts.find(a => a.id === t.accountId)?.name || 'Direct'}
-                                    {t.destinationAccountId && ` ➔ ${accounts.find(a => a.id === t.destinationAccountId)?.name}`}
+                                    {t.type === 'JOURNAL'
+                                       ? `${t.category} (Dr) ➔ ${t.mainCategory} (Cr)`
+                                       : (accounts.find(a => a.id === t.accountId)?.name || 'Direct') + (t.destinationAccountId ? ` ➔ ${accounts.find(a => a.id === t.destinationAccountId)?.name}` : '')
+                                    }
                                  </p>
                               </div>
                            </td>
                            <td className="px-3 py-2 text-right whitespace-nowrap">
                               <p className={`text-sm font-black font-mono tracking-tighter ${t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' || (t.type === 'TRANSFER' && t.destinationAccountId)
                                  ? 'text-slate-900'
-                                 : 'text-rose-600'
+                                 : t.type === 'JOURNAL'
+                                    ? 'text-indigo-900'
+                                    : 'text-rose-600'
                                  }`}>
-                                 {t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' ? '+' : t.type === 'TRANSFER' ? '•' : '-'} Rs. {Number(t.amount).toLocaleString()}
+                                 {t.type === 'JOURNAL' ? '•' : (t.type === 'SALE' || t.type === 'CREDIT_PAYMENT' ? '+' : t.type === 'TRANSFER' ? '•' : '-')} Rs. {Number(t.amount).toLocaleString()}
                               </p>
                            </td>
                            <td className="px-3 py-2 text-center">
                               <div className="flex justify-center gap-2">
-                                 <button
-                                    onClick={() => {
-                                       if (t.type === 'SALE') onResumeDraft(t);
-                                       else openEditExpense(t);
-                                    }}
-                                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
-                                    title="Edit Entry"
-                                 >
-                                    ✏️
-                                 </button>
+                                 {t.type !== 'JOURNAL' ? (
+                                    <button
+                                       onClick={() => {
+                                          if (t.type === 'SALE') onResumeDraft(t);
+                                          else openEditExpense(t);
+                                       }}
+                                       className="w-8 h-8 flex items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                       title="Edit Entry"
+                                    >
+                                       ✏️
+                                    </button>
+                                 ) : (
+                                    <div className="w-8 h-8"></div>
+                                 )}
                                  <button
                                     onClick={() => {
                                        if (confirm("CRITICAL: Delete this transaction? This will reverse all linked accounting impacts.")) {
@@ -840,6 +912,145 @@ const Finance: React.FC<FinanceProps> = ({
                         </div>
                      </div>
                   </div>
+               </div>
+            </div>
+         )}
+         {/* Journal Entry Modal */}
+         {showJournalModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-xl">
+               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-300 max-h-[90vh] flex flex-col">
+                  <div className="p-6 border-b border-slate-50 bg-slate-50 flex justify-between items-center shrink-0">
+                     <div>
+                        <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter">
+                           New Journal Entry
+                        </h3>
+                        <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mt-0.5">Manual General Ledger Adjustment</p>
+                     </div>
+                     <button onClick={() => setShowJournalModal(false)} className="text-slate-350 hover:text-slate-900 text-3xl leading-none">&times;</button>
+                  </div>
+
+                  <form onSubmit={handleJournalSubmit} className="p-6 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Debit Account */}
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Debit Account (Dr)</label>
+                           <select 
+                              value={journalDebit}
+                              onChange={(e) => setJournalDebit(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 font-bold uppercase outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                           >
+                              {['Cash / Bank', 'Accounts Receivable', 'Inventory Asset', 'Fixed Assets', 'Accumulated Depreciation', 'Accounts Payable', 'Sales Revenue', 'Cost of Goods Sold (COGS)', 'Operating Expenses', 'Rent', 'Office Maintaince', 'Insurance Payment', 'Office Maintaince Phone', 'Utilities', 'Transport', 'Depreciation Expense', 'Uncategorized', 'Loans Receivable', 'Share Capital', 'Director C/A', 'Owner Equity / Retained Earnings'].map(acc => (
+                                 <option key={acc} value={acc}>{acc}</option>
+                              ))}
+                           </select>
+                        </div>
+
+                        {/* Credit Account */}
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Credit Account (Cr)</label>
+                           <select 
+                              value={journalCredit}
+                              onChange={(e) => setJournalCredit(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-800 font-bold uppercase outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                           >
+                              {['Cash / Bank', 'Accounts Receivable', 'Inventory Asset', 'Fixed Assets', 'Accumulated Depreciation', 'Accounts Payable', 'Sales Revenue', 'Cost of Goods Sold (COGS)', 'Operating Expenses', 'Rent', 'Office Maintaince', 'Insurance Payment', 'Office Maintaince Phone', 'Utilities', 'Transport', 'Depreciation Expense', 'Uncategorized', 'Loans Receivable', 'Share Capital', 'Director C/A', 'Owner Equity / Retained Earnings'].map(acc => (
+                                 <option key={acc} value={acc}>{acc}</option>
+                              ))}
+                           </select>
+                        </div>
+                     </div>
+
+                     {/* Specific Bank Account Selector for Debit (if Cash / Bank or Director C/A is debited) */}
+                     {(journalDebit === 'Cash / Bank' || journalDebit === 'Director C/A') && (
+                        <div className="flex flex-col gap-1.5 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Debit Cash/Bank Node</label>
+                           <select
+                              value={journalDebitAccountId}
+                              onChange={(e) => setJournalDebitAccountId(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-900 font-semibold outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                           >
+                              {accounts.map(acc => (
+                                 <option key={acc.id} value={acc.id}>{acc.name.toUpperCase()} (Bal: Rs. {acc.balance.toLocaleString()})</option>
+                              ))}
+                           </select>
+                        </div>
+                     )}
+
+                     {/* Specific Bank Account Selector for Credit (if Cash / Bank or Director C/A is credited) */}
+                     {(journalCredit === 'Cash / Bank' || journalCredit === 'Director C/A') && (
+                        <div className="flex flex-col gap-1.5 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Credit Cash/Bank Node</label>
+                           <select
+                              value={journalCreditAccountId}
+                              onChange={(e) => setJournalCreditAccountId(e.target.value)}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-900 font-semibold outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                           >
+                              {accounts.map(acc => (
+                                 <option key={acc.id} value={acc.id}>{acc.name.toUpperCase()} (Bal: Rs. {acc.balance.toLocaleString()})</option>
+                              ))}
+                           </select>
+                        </div>
+                     )}
+
+                     {/* Amount and Date */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Transaction Amount (Rs.)</label>
+                           <input 
+                              required 
+                              type="number" 
+                              step="0.01"
+                              placeholder="0.00"
+                              value={journalAmount}
+                              onChange={(e) => setJournalAmount(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-black font-mono text-slate-900 outline-none focus:border-indigo-500 transition-all"
+                           />
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Posting Date</label>
+                           <input 
+                              required 
+                              type="date"
+                              value={journalDate}
+                              onChange={(e) => setJournalDate(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-700 outline-none focus:border-indigo-500 transition-all"
+                           />
+                        </div>
+                     </div>
+
+                     {/* Branch and Description */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Cashier / Branch Node</label>
+                           <select 
+                              value={journalBranch}
+                              onChange={(e) => setJournalBranch(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-900 outline-none focus:border-indigo-500 transition-all cursor-pointer"
+                           >
+                              {userProfile.allBranches?.filter(b => b !== 'ALL').map(b => (
+                                 <option key={b} value={b}>{b}</option>
+                              ))}
+                           </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1.5">
+                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Memo / Description</label>
+                           <input 
+                              required
+                              type="text"
+                              placeholder="e.g., Annual Depreciation Allocation"
+                              value={journalDesc}
+                              onChange={(e) => setJournalDesc(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-semibold text-slate-900 outline-none focus:border-indigo-500 transition-all"
+                           />
+                        </div>
+                     </div>
+
+                     <button type="submit" className="w-full bg-indigo-900 hover:bg-indigo-950 text-white font-black py-4 rounded-xl uppercase tracking-widest text-[9px] shadow-lg transition-all mt-4">
+                        Post Adjustment Journal
+                     </button>
+                  </form>
                </div>
             </div>
          )}

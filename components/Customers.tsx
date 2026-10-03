@@ -12,9 +12,11 @@ interface CustomersProps {
   onDeleteTransaction: (id: string) => void;
   jumpTarget?: { type: 'PO' | 'CUSTOMER' | 'VENDOR' | 'SALE'; id: string } | null;
   clearJump?: () => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts, products, onUpsertCustomer, onReceivePayment, onUpdateTransaction, onDeleteTransaction, jumpTarget, clearJump }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts, products, onUpsertCustomer, onReceivePayment, onUpdateTransaction, onDeleteTransaction, jumpTarget, clearJump, onLoadMore, hasMore = false }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -132,40 +134,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
   }, [customerHistory]);
 
   const exposureAggregate = useMemo(() => {
-    // Correct aggregate should be: (Total Payments) - (Total Billed)
-    // To handle the "linked" payments correctly without double counting:
-    // We sum all Payments (independent of links) and then subtract (Billed - Initial POS Payment).
-    // A simpler but equivalent way using the new logic:
+    // Exposure Aggregate = Sum of all Paid (+) minus Sum of all Taken (-) across the ledger history
     return customerHistory.reduce((sum, tx) => {
       if (tx.type === 'SALE' || tx.type === 'LOAN_GIVEN' || tx.type === 'SALE_HISTORY_IMPORT') {
-        // Impact of a sale is the balance that was NOT paid at POS
-        // However, if we count all CREDIT_PAYMENT rows separately, we should use the total Billed amount here.
-        // Debit: Total Amount
-        sum -= Number(tx.amount || 0);
-
-        // Credit: Only the part paid at the time of sale (POS)
-        // We calculate this as (Total Paid - Sum of all linked payments)
-        // BUT wait, a simpler way is: Debit = Amount, Credit = All Payments (Linked + Unlinked) + Initial Paid.
-        // If 'paidAmount' is updated by links, then 'paidAmount' is Total Paid.
-        // So for the sale row alone, we should add back 'paidAmount'.
-        sum += Number(tx.paidAmount || 0);
-        return sum;
+        const taken = Number(tx.amount || 0);
+        const linkedTotal = customerHistory
+          .filter(lt => lt.parentTxId === tx.id && lt.type === 'CREDIT_PAYMENT')
+          .reduce((s, lt) => s + Number(lt.amount || 0), 0);
+        const initialPaid = Math.max(0, Number(tx.paidAmount || 0) - linkedTotal);
+        return sum - taken + initialPaid;
       }
       if (tx.type === 'CREDIT_PAYMENT') {
-        // IF the payment is linked to a SALE in this same history, and that SALE is using its 'paidAmount' (which includes this payment),
-        // we would double count.
-        // SOLUTION: Only add CREDIT_PAYMENT if it's NOT linked to a transaction already in the bucket? 
-        // No, easier: aggregate = sum(Sales.initialPaid) + sum(All CreditPayments) - sum(Sales.amount).
-        // Since we don't have initialPaid separately, we use:
-        // Aggregate = sum(All CreditPayments) - sum(Sales where paymentMethod == 'CREDIT' ? amount : balanceDue)
-
-        // Let's use the most reliable formula:
-        if (tx.parentTxId) {
-          // If it's linked, its impact is already included in the parent's balanceDue / paidAmount.
-          // So we skip adding it here to avoid double-counting.
-          return sum;
-        }
-        return sum + (Number(tx.amount) || 0);
+        return sum + Number(tx.amount || 0);
       }
       return sum;
     }, 0);

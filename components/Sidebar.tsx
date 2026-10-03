@@ -11,6 +11,7 @@ interface SidebarProps {
   onEditProfile: () => void;
   onLogout: () => void;
   onSwitchBranch?: (branch: string) => void;
+  chequeAlertCount?: number;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -21,7 +22,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   accounts,
   onEditProfile,
   onLogout,
-  onSwitchBranch
+  onSwitchBranch,
+  chequeAlertCount = 0
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -33,11 +35,13 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'SALES_HISTORY', label: 'Sales History', icon: '📜' },
     { id: 'INVENTORY', label: 'Inventory', icon: '📦' },
     { id: 'FIXED_ASSETS', label: 'Fixed Assets', icon: '🏛️' },
+    { id: 'REPORTS', label: 'Report', icon: '📋' },
     { id: 'BARCODE_PRINT', label: 'Barcode Print', icon: '🏷️' },
     { id: 'PURCHASES', label: 'Purchases', icon: '📥' },
     { id: 'CUSTOMERS', label: 'Customers', icon: '👥' },
     { id: 'FINANCE', label: 'Finance', icon: '💰' },
     { id: 'ACCOUNTING', label: 'Accounting', icon: '📈' },
+    { id: 'ACCOUNTING_LIABILITIES', label: 'Accounting & Liabilities', icon: '⚖️' },
     { id: 'RELOAD', label: 'Reload', icon: '📱' },
     { id: 'CHEQUE_PRINT', label: 'Cheque Print', icon: '✍️' },
     ...(userProfile.isAdmin ? [{ id: 'USER_CONTROL', label: 'User Control', icon: '🛡️' }] : []),
@@ -97,20 +101,31 @@ const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 px-3 space-y-1 overflow-y-auto custom-scrollbar pt-2">
         {menuItems.map((item) => {
           const isActive = currentView === item.id;
+          const showBadge = (item.id === 'DASHBOARD' || item.id === 'CHEQUE_PRINT') && chequeAlertCount > 0;
           return (
             <button
               key={item.id}
-              onClick={() => setView(item.id as View)}
+              onClick={() => {
+                setView(item.id as View);
+                window.history.replaceState(null, '', '?view=' + item.id);
+              }}
               title={item.label}
-              className={`w-full group flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all duration-200 ${isActive
+              className={`w-full group flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 text-[11px] font-black uppercase tracking-widest rounded-xl transition-all duration-200 ${isActive
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50 ring-1 ring-indigo-500/50'
                 : 'text-slate-400 hover:bg-white/5 hover:text-indigo-300'
                 }`}
             >
-              <span className={`text-xl transition-transform group-hover:scale-110 ${isCollapsed ? 'mr-0' : 'mr-3'} ${isActive ? 'opacity-100' : 'opacity-30'}`}>
-                {item.icon}
-              </span>
-              {!isCollapsed && <span>{item.label}</span>}
+              <div className="flex items-center">
+                <span className={`text-xl transition-transform group-hover:scale-110 ${isCollapsed ? 'mr-0' : 'mr-3'} ${isActive ? 'opacity-100' : 'opacity-30'}`}>
+                  {item.icon}
+                </span>
+                {!isCollapsed && <span>{item.label}</span>}
+              </div>
+              {showBadge && (
+                <span className="w-5 h-5 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center animate-pulse shadow-md">
+                  {chequeAlertCount}
+                </span>
+              )}
             </button>
           );
         })}

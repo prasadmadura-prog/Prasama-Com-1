@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Product, PurchaseOrder, PurchaseOrderItem, POStatus, Vendor, UserProfile, BankAccount, Transaction, Category } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { collections, upsertDocument, deleteDocument } from '../services/database';
 
 interface PurchasesProps {
   products: Product[];
@@ -56,8 +57,25 @@ const Purchases: React.FC<PurchasesProps> = ({
   const [vendorId, setVendorId] = useState('');
   const [accountId, setAccountId] = useState('cash');
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'BANK' | 'CARD' | 'CREDIT' | 'CHEQUE'>('BANK');
-  const [chequeNumber, setChequeNumber] = useState('');
-  const [chequeDate, setChequeDate] = useState(new Date().toISOString().split('T')[0]);
+  const [chequesList, setChequesList] = useState<{ number: string; date: string; amount: string }[]>([
+    { number: '', date: new Date().toISOString().split('T')[0], amount: '' }
+  ]);
+
+
+  const handleRemoveCheque = (index: number) => {
+    setChequesList(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      return next.length > 0 ? next : [{ number: '', date: new Date().toISOString().split('T')[0], amount: '' }];
+    });
+  };
+
+  const handleChequeChange = (index: number, field: 'number' | 'date' | 'amount', value: string) => {
+    setChequesList(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
   const [poDate, setPoDate] = useState(new Date().toISOString().split('T')[0]);
   const [poNotes, setPoNotes] = useState('');
   const [poItems, setPoItems] = useState<PurchaseOrderItem[]>([]);
@@ -156,8 +174,40 @@ const Purchases: React.FC<PurchasesProps> = ({
   }, [sortedProducts, productSearch, selectedCatId]);
 
   const totalAmount = useMemo(() =>
-    poItems.reduce((sum, item) => sum + (item.quantity * (item.cost || 0)), 0)
+    poItems.reduce((sum, item) => {
+      const lineGrossCost = (Number(item.quantity) || 0) * (Number(item.cost) || 0);
+      const discPct = Number(item.discountPercent !== undefined ? item.discountPercent : item.discount) || 0;
+      const discAmount = lineGrossCost * (discPct / 100);
+      return sum + Math.max(0, lineGrossCost - discAmount);
+    }, 0)
     , [poItems]);
+
+  const handleAddCheque = () => {
+    setChequesList(prev => {
+      const currentSum = prev.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+      const remaining = Math.max(0, Math.round((Number(totalAmount) - currentSum) * 100) / 100);
+      return [
+        ...prev,
+        {
+          number: '',
+          date: new Date().toISOString().split('T')[0],
+          amount: remaining > 0 ? remaining.toFixed(2) : ''
+        }
+      ];
+    });
+  };
+
+  const handleAutoFillFinalCheque = () => {
+    setChequesList(prev => {
+      if (prev.length === 0) return prev;
+      const lastIndex = prev.length - 1;
+      const otherSum = prev.slice(0, lastIndex).reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+      const remaining = Math.max(0, Math.round((Number(totalAmount) - otherSum) * 100) / 100);
+      const next = [...prev];
+      next[lastIndex] = { ...next[lastIndex], amount: remaining.toFixed(2) };
+      return next;
+    });
+  };
 
   // Auto-save effect
   useEffect(() => {
@@ -193,18 +243,65 @@ const Purchases: React.FC<PurchasesProps> = ({
         totalAmount,
         paymentMethod,
         accountId: (paymentMethod === 'BANK' || paymentMethod === 'CHEQUE' || paymentMethod === 'CARD') ? accountId : 'cash',
-        ...(paymentMethod === 'CHEQUE' && { chequeNumber, chequeDate }),
+        ...(paymentMethod === 'CHEQUE' && {
+          cheques: chequesList.map((c, index) => {
+            const sumOthers = chequesList.filter((_, i) => i !== index).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+            const num = parseFloat(c.amount);
+            const resolvedAmt = !isNaN(num) && num > 0
+              ? num
+              : (index === chequesList.length - 1 ? Math.max(0, Math.round((Number(totalAmount) - sumOthers) * 100) / 100) : (index === 0 ? Number(totalAmount) || 0 : undefined));
+            return {
+              chequeNumber: c.number.toUpperCase().trim(),
+              chequeDate: c.date,
+              amount: resolvedAmt
+            };
+          }),
+          chequeNumber: chequesList[0]?.number.toUpperCase().trim() || '',
+          chequeDate: chequesList[0]?.date || poDate,
+          chequeAmount1: chequesList[0]?.amount ? parseFloat(chequesList[0].amount) : Number(totalAmount) || undefined,
+          chequeNumber2: chequesList[1]?.number.toUpperCase().trim() || '',
+          chequeDate2: chequesList[1]?.date || poDate,
+          chequeAmount2: chequesList[1]?.amount ? parseFloat(chequesList[1].amount) : undefined,
+        }),
         notes: poNotes,
         mainCategory: poMainCategory,
         category: poCategory
       });
+
+      // Auto-sync cheques to futureCheques register during auto-save
+      if (paymentMethod === 'CHEQUE') {
+        const selectedVendorObj = vendors.find(v => v.id === vendorId);
+        const payeeName = selectedVendorObj?.name || 'VENDOR PAYEE';
+        chequesList.forEach((chq, index) => {
+          if (chq.number && chq.number.trim()) {
+            const chqNum = chq.number.toUpperCase().trim();
+            const sumOthers = chequesList.filter((_, i) => i !== index).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+            const num = parseFloat(chq.amount);
+            const resolvedAmt = !isNaN(num) && num > 0
+              ? num
+              : (index === chequesList.length - 1 ? Math.max(0, Math.round((Number(totalAmount) - sumOthers) * 100) / 100) : (index === 0 ? (Number(totalAmount) || 0) : 0));
+            const chequeDoc = {
+              id: `fc-${chqNum}`,
+              chequeNumber: chqNum,
+              date: chq.date || poDate,
+              amount: resolvedAmt,
+              payee: payeeName,
+              status: 'future_release',
+              notes: `PO Ref (Chq ${index + 1}): ${currentPOId}`,
+              createdAt: new Date().toISOString()
+            };
+            upsertDocument(collections.futureCheques || 'p_v16_futureCheques', chequeDoc.id, chequeDoc).catch(() => {});
+          }
+        });
+      }
+
       setSyncStatus('SYNCED');
     }, 1200);
 
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [poItems, vendorId, poDate, paymentMethod, accountId, chequeNumber, chequeDate, poNotes, isPOModalOpen, currentPOId, selectedPO]);
+  }, [poItems, vendorId, poDate, paymentMethod, accountId, chequesList, poNotes, isPOModalOpen, currentPOId, selectedPO]);
 
   // Financial tracking for current PO
   const poFinancials = useMemo(() => {
@@ -331,15 +428,24 @@ const Purchases: React.FC<PurchasesProps> = ({
         productSku: product.sku,
         quantity: 1,
         freeQuantity: 0,
-        cost: product.cost
+        cost: product.cost,
+        discountPercent: 0,
+        discount: 0
       }, ...poItems]);
     }
   };
 
   const updatePOItem = (index: number, field: keyof PurchaseOrderItem, value: string | number) => {
-    const updated = [...poItems];
-    updated[index] = { ...updated[index], [field]: Number(value) };
-    setPoItems(updated);
+    setPoItems(prev => {
+      const updated = [...prev];
+      const numVal = isNaN(parseFloat(String(value))) ? 0 : parseFloat(String(value));
+      if (field === 'discountPercent' || field === 'discount') {
+        updated[index] = { ...updated[index], discountPercent: numVal, discount: numVal };
+      } else {
+        updated[index] = { ...updated[index], [field]: numVal };
+      }
+      return updated;
+    });
   };
 
   const removePOItem = (index: number) => setPoItems(poItems.filter((_, i) => i !== index));
@@ -382,25 +488,75 @@ const Purchases: React.FC<PurchasesProps> = ({
             products.find(p => p.sku === i.productSku) ||
             products.find(p => p.name?.toUpperCase().trim() === (i.productName || i.productId)?.toString().toUpperCase().trim());
 
+          const discPct = Number(i.discountPercent !== undefined ? i.discountPercent : i.discount) || 0;
           return {
             productId: i.productId,
             productName: product?.name || i.productName || 'Unknown Item',
             productSku: product?.sku || i.productSku || 'N/A',
             quantity: Number(i.quantity) || 0,
             freeQuantity: Number(i.freeQuantity) || 0,
-            cost: Number(i.cost) || 0
+            cost: Number(i.cost) || 0,
+            discountPercent: discPct,
+            discount: discPct
           };
         }),
         status: targetStatus,
         totalAmount: Number(totalAmount) || 0,
         paymentMethod,
         accountId: (paymentMethod === 'BANK' || paymentMethod === 'CHEQUE' || paymentMethod === 'CARD') ? accountId : 'cash',
-        ...(paymentMethod === 'CHEQUE' && { chequeNumber, chequeDate }),
+        ...(paymentMethod === 'CHEQUE' && {
+          cheques: chequesList.map((c, index) => {
+            const sumOthers = chequesList.filter((_, i) => i !== index).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+            const num = parseFloat(c.amount);
+            const resolvedAmt = !isNaN(num) && num > 0
+              ? num
+              : (index === chequesList.length - 1 ? Math.max(0, Math.round((Number(totalAmount) - sumOthers) * 100) / 100) : (index === 0 ? Number(totalAmount) || 0 : undefined));
+            return {
+              chequeNumber: c.number.toUpperCase().trim(),
+              chequeDate: c.date,
+              amount: resolvedAmt
+            };
+          }),
+          chequeNumber: chequesList[0]?.number.toUpperCase().trim() || '',
+          chequeDate: chequesList[0]?.date || poDate,
+          chequeAmount1: chequesList[0]?.amount ? parseFloat(chequesList[0].amount) : Number(totalAmount) || undefined,
+          chequeNumber2: chequesList[1]?.number.toUpperCase().trim() || '',
+          chequeDate2: chequesList[1]?.date || poDate,
+          chequeAmount2: chequesList[1]?.amount ? parseFloat(chequesList[1].amount) : undefined,
+        }),
         notes: poNotes,
         mainCategory: poMainCategory,
         category: poCategory,
         branchId: poBranchId || userProfile.branch
       });
+
+      if (paymentMethod === 'CHEQUE') {
+        const selectedVendorObj = vendors.find(v => v.id === vendorId);
+        const payeeName = selectedVendorObj?.name || 'VENDOR PAYEE';
+
+        chequesList.forEach((chq, index) => {
+          if (chq.number.trim()) {
+            const chqNum = chq.number.toUpperCase().trim();
+            const sumOthers = chequesList.filter((_, i) => i !== index).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+            const num = parseFloat(chq.amount);
+            const resolvedAmt = !isNaN(num) && num > 0
+              ? num
+              : (index === chequesList.length - 1 ? Math.max(0, Math.round((Number(totalAmount) - sumOthers) * 100) / 100) : (index === 0 ? (Number(totalAmount) || 0) : 0));
+            const chequeDoc = {
+              id: `fc-${chqNum}`,
+              chequeNumber: chqNum,
+              date: chq.date || poDate,
+              amount: resolvedAmt,
+              payee: payeeName,
+              status: 'future_release',
+              notes: `PO Ref (Chq ${index + 1}): ${finalId}`,
+              createdAt: new Date().toISOString()
+            };
+            upsertDocument(collections.futureCheques || 'p_v16_futureCheques', chequeDoc.id, chequeDoc).catch(() => {});
+          }
+        });
+      }
+
       setSyncStatus('SYNCED');
       closePOModal();
     } catch (error: any) {
@@ -420,8 +576,37 @@ const Purchases: React.FC<PurchasesProps> = ({
       setVendorId(po.vendorId);
       setPaymentMethod(po.paymentMethod);
       setAccountId(po.accountId || 'cash');
-      setChequeNumber(po.chequeNumber || '');
-      setChequeDate(po.chequeDate || new Date().toISOString().split('T')[0]);
+
+      if (po.cheques && po.cheques.length > 0) {
+        setChequesList(po.cheques.map(c => ({
+          number: c.chequeNumber || '',
+          date: c.chequeDate || new Date().toISOString().split('T')[0],
+          amount: c.amount !== undefined ? c.amount.toString() : ''
+        })));
+      } else if (po.chequeNumber || po.chequeNumber2 || po.chequeAmount1 !== undefined || po.chequeAmount2 !== undefined) {
+        const list: { number: string; date: string; amount: string }[] = [];
+        if (po.chequeNumber || po.chequeDate || po.chequeAmount1 !== undefined) {
+          list.push({
+            number: po.chequeNumber || '',
+            date: po.chequeDate || new Date().toISOString().split('T')[0],
+            amount: po.chequeAmount1 !== undefined ? po.chequeAmount1.toString() : ''
+          });
+        }
+        if (po.chequeNumber2 || po.chequeDate2 || po.chequeAmount2 !== undefined) {
+          list.push({
+            number: po.chequeNumber2 || '',
+            date: po.chequeDate2 || new Date().toISOString().split('T')[0],
+            amount: po.chequeAmount2 !== undefined ? po.chequeAmount2.toString() : ''
+          });
+        }
+        if (list.length === 0) {
+          list.push({ number: '', date: new Date().toISOString().split('T')[0], amount: '' });
+        }
+        setChequesList(list);
+      } else {
+        setChequesList([{ number: '', date: new Date().toISOString().split('T')[0], amount: '' }]);
+      }
+
       setPoDate(po.date.split('T')[0]);
       setPoNotes(po.notes || '');
       setPoItems(po.items);
@@ -434,8 +619,7 @@ const Purchases: React.FC<PurchasesProps> = ({
       setVendorId('');
       setPaymentMethod('BANK');
       setAccountId(accounts.find(a => a.id !== 'cash')?.id || 'cash');
-      setChequeNumber('');
-      setChequeDate(new Date().toISOString().split('T')[0]);
+      setChequesList([{ number: '', date: new Date().toISOString().split('T')[0], amount: '' }]);
       setPoDate(new Date().toISOString().split('T')[0]);
       setPoNotes('');
       setPoItems([]);
@@ -448,6 +632,32 @@ const Purchases: React.FC<PurchasesProps> = ({
   };
 
   const closePOModal = () => {
+    // If there were pending cheque entries, flush/sync them right before closing
+    if (paymentMethod === 'CHEQUE' && currentPOId) {
+      const selectedVendorObj = vendors.find(v => v.id === vendorId);
+      const payeeName = selectedVendorObj?.name || 'VENDOR PAYEE';
+      chequesList.forEach((chq, index) => {
+        if (chq.number && chq.number.trim()) {
+          const chqNum = chq.number.toUpperCase().trim();
+          const sumOthers = chequesList.filter((_, i) => i !== index).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+          const num = parseFloat(chq.amount);
+          const resolvedAmt = !isNaN(num) && num > 0
+            ? num
+            : (index === chequesList.length - 1 ? Math.max(0, Math.round((Number(totalAmount) - sumOthers) * 100) / 100) : (index === 0 ? (Number(totalAmount) || 0) : 0));
+          const chequeDoc = {
+            id: `fc-${chqNum}`,
+            chequeNumber: chqNum,
+            date: chq.date || poDate,
+            amount: resolvedAmt,
+            payee: payeeName,
+            status: 'future_release',
+            notes: `PO Ref (Chq ${index + 1}): ${currentPOId}`,
+            createdAt: new Date().toISOString()
+          };
+          upsertDocument(collections.futureCheques || 'p_v16_futureCheques', chequeDoc.id, chequeDoc).catch(() => {});
+        }
+      });
+    }
     setIsPOModalOpen(false);
     setSelectedPO(null);
     setCurrentPOId(null);
@@ -678,7 +888,17 @@ const Purchases: React.FC<PurchasesProps> = ({
             <div class="box" style="text-align: right;">
               <h5>Settlement Pipeline</h5>
               <h3 style="color: #4f46e5;">${po.paymentMethod}</h3>
-              ${po.chequeNumber ? `<p>CHQ: ${po.chequeNumber}</p>` : ''}
+              ${(() => {
+                if (po.cheques && po.cheques.length > 0) {
+                  return po.cheques.map((c, i) =>
+                    `<p>CHQ ${i + 1}: ${c.chequeNumber} (${c.chequeDate})${c.amount ? ' - Rs. ' + Number(c.amount).toLocaleString() : ''}</p>`
+                  ).join('');
+                }
+                let str = '';
+                if (po.chequeNumber) str += `<p>CHQ 1: ${po.chequeNumber} (${po.chequeDate})${po.chequeAmount1 ? ' - Rs. ' + Number(po.chequeAmount1).toLocaleString() : ''}</p>`;
+                if (po.chequeNumber2) str += `<p>CHQ 2: ${po.chequeNumber2} (${po.chequeDate2})${po.chequeAmount2 ? ' - Rs. ' + Number(po.chequeAmount2).toLocaleString() : ''}</p>`;
+                return str;
+              })()}
             </div>
           </div>
 
@@ -742,7 +962,7 @@ const Purchases: React.FC<PurchasesProps> = ({
               * Payments made for printouts or photocopies are non-refundable.<br/>
               * Exchanges are accepted on the same day only. No refunds will be provided.
           </div>
-          <div class="footer">THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS</div>
+          <div class="footer">~~~Thank You~~~</div>
         </body>
       </html>
     `);
@@ -1457,25 +1677,132 @@ const Purchases: React.FC<PurchasesProps> = ({
                   </div>
 
                   {paymentMethod === 'CHEQUE' && (
-                    <div className="grid grid-cols-2 gap-4 mb-4 animate-in slide-in-from-top-2">
-                      <div className="space-y-1">
-                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque No</label>
-                        <input
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 font-black font-mono text-[10px] outline-none"
-                          value={chequeNumber}
-                          onChange={(e) => setChequeNumber(e.target.value.toUpperCase())}
-                          placeholder="CHQ-0000"
-                        />
+                    <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-4 mb-4 animate-in slide-in-from-top-2">
+                      <div className="flex justify-between items-center border-b border-indigo-100/80 pb-2 flex-wrap gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[9px] font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                            <span>💳</span> CHEQUE PAYMENT DETAILS ({chequesList.length} {chequesList.length === 1 ? 'CHEQUE' : 'CHEQUES'})
+                          </span>
+                          <span className="text-[9px] font-black text-indigo-600 bg-indigo-100 px-2.5 py-0.5 rounded-full font-mono">
+                            Allocated: Rs. {chequesList.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / Rs. {Number(totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                          {(() => {
+                            const alloc = chequesList.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+                            const diff = Math.round((Number(totalAmount) - alloc) * 100) / 100;
+                            if (Math.abs(diff) < 0.01) {
+                              return (
+                                <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full font-mono">
+                                  ✅ Fully Balanced
+                                </span>
+                              );
+                            }
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[9px] font-black px-2.5 py-0.5 rounded-full font-mono ${diff > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                  {diff > 0 ? `Unallocated: Rs. ${diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `Over: Rs. ${Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={handleAutoFillFinalCheque}
+                                  className="text-[8px] font-black uppercase tracking-wider px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg shadow-sm active:scale-95 transition-all"
+                                  title="Auto-balance the remaining PO amount onto the final cheque"
+                                >
+                                  ⚡ Auto-Balance Final
+                                </button>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddCheque}
+                          className="text-[9px] font-black uppercase tracking-widest px-3 py-1 bg-indigo-600 border border-indigo-600 rounded-lg text-white hover:bg-indigo-700 transition-all shadow-sm flex items-center gap-1 active:scale-95"
+                        >
+                          <span>+ Add Another Cheque</span>
+                        </button>
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Maturity Date</label>
-                        <input
-                          type="date"
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-[10px] outline-none"
-                          value={chequeDate}
-                          onChange={(e) => setChequeDate(e.target.value)}
-                        />
-                      </div>
+
+                      {chequesList.map((chq, index) => (
+                        <div key={index} className={`space-y-2 ${index > 0 ? 'pt-3 border-t border-indigo-100/60 animate-in slide-in-from-top-1' : ''}`}>
+                          <div className="flex justify-between items-center">
+                            <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1.5">
+                              <span className="w-4 h-4 bg-indigo-200 text-indigo-800 rounded-full text-[8px] flex items-center justify-center font-bold">{index + 1}</span>
+                              Cheque {index + 1} Details {index === 0 ? '' : `(Secondary #${index + 1})`}
+                            </p>
+                            {chequesList.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveCheque(index)}
+                                className="text-[8px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-0.5 rounded transition-all"
+                              >
+                                ✕ Remove Cheque {index + 1}
+                              </button>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque No {index + 1}</label>
+                              <input
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-black font-mono text-[10px] bg-white outline-none focus:border-indigo-500 uppercase"
+                                value={chq.number}
+                                onChange={(e) => handleChequeChange(index, 'number', e.target.value.toUpperCase())}
+                                placeholder={`CHQ-${String(index + 1).padStart(5, '0')}`}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Maturity Date {index + 1}</label>
+                              <input
+                                type="date"
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-[10px] bg-white outline-none focus:border-indigo-500"
+                                value={chq.date}
+                                onChange={(e) => handleChequeChange(index, 'date', e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque {index + 1} Amt (Rs)</label>
+                                {index === chequesList.length - 1 && chequesList.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={handleAutoFillFinalCheque}
+                                    className="text-[7px] font-black text-amber-600 hover:text-amber-800 underline uppercase"
+                                  >
+                                    Auto-Balance
+                                  </button>
+                                )}
+                              </div>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold font-mono text-[10px] bg-white outline-none focus:border-indigo-500"
+                                value={chq.amount}
+                                onChange={(e) => handleChequeChange(index, 'amount', e.target.value)}
+                                placeholder={(() => {
+                                  if (index === chequesList.length - 1) {
+                                    const otherSum = chequesList.slice(0, index).reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+                                    const rem = Math.max(0, Math.round((Number(totalAmount) - otherSum) * 100) / 100);
+                                    return rem > 0 ? rem.toFixed(2) : "0.00";
+                                  }
+                                  return "Optional";
+                                })()}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {chequesList.length > 1 && (
+                        <div className="pt-1 flex justify-center">
+                          <button
+                            type="button"
+                            onClick={handleAddCheque}
+                            className="text-[9px] font-black uppercase tracking-widest px-4 py-1.5 bg-white border border-indigo-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+                          >
+                            <span>+ Add Cheque #{chequesList.length + 1}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1487,9 +1814,10 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <th className="px-6 py-5 w-12 text-center">#</th>
                             <th className="px-6 py-5">Asset Description</th>
                             <th className="px-6 py-5">SKU</th>
-                            <th className="px-2 py-5 min-w-[110px] text-right">Unit Cost (Rs.)</th>
-                            <th className="px-2 py-5 min-w-[80px] text-center">Qty</th>
-                            <th className="px-2 py-5 min-w-[80px] text-center">Free Iss.</th>
+                            <th className="px-2 py-5 min-w-[100px] text-right">Unit Cost (Rs.)</th>
+                            <th className="px-2 py-5 min-w-[70px] text-center">Qty</th>
+                            <th className="px-2 py-5 min-w-[70px] text-center">Free Iss.</th>
+                            <th className="px-2 py-5 min-w-[90px] text-right">Disc. (%)</th>
                             <th className="px-6 py-5 w-24 text-right">Retail</th>
                             <th className="px-6 py-5 w-24 text-right">Est. Profit</th>
                             <th className="px-6 py-5 w-32 text-right">Subtotal</th>
@@ -1501,7 +1829,10 @@ const Purchases: React.FC<PurchasesProps> = ({
                             const product = products.find(p => p.id === item.productId) ||
                               products.find(p => p.sku === item.productId) ||
                               products.find(p => p.name?.toUpperCase().trim() === item.productId?.toString().toUpperCase().trim());
-                            const totalCost = item.quantity * item.cost;
+                            const rawCost = (Number(item.quantity) || 0) * (Number(item.cost) || 0);
+                            const discPct = Number(item.discountPercent !== undefined ? item.discountPercent : item.discount) || 0;
+                            const discAmount = rawCost * (discPct / 100);
+                            const totalCost = Math.max(0, rawCost - discAmount);
                             const totalRetail = (Number(item.quantity) + (Number(item.freeQuantity) || 0)) * Number(product?.price || 0);
                             const profit = totalRetail - totalCost;
                             return (
@@ -1527,6 +1858,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     type="number"
                                     step="0.001"
                                     value={item.cost}
+                                    onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'cost', e.target.value)}
                                     className="w-full min-w-[100px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-indigo-600 text-right bg-white focus:border-indigo-500 transition-all outline-none"
                                   />
@@ -1536,6 +1868,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     type="number"
                                     step="0.001"
                                     value={item.quantity}
+                                    onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'quantity', e.target.value)}
                                     className="w-full min-w-[80px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-900 text-center bg-white focus:border-indigo-500 transition-all outline-none"
                                   />
@@ -1545,20 +1878,42 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     type="number"
                                     step="0.001"
                                     value={item.freeQuantity || 0}
+                                    onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'freeQuantity', e.target.value)}
                                     className="w-full min-w-[80px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-emerald-600 text-center bg-white focus:border-indigo-500 transition-all outline-none"
                                   />
+                                </td>
+                                <td className="px-2 py-3">
+                                  <div className="relative flex items-center">
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      max="100"
+                                      value={discPct !== 0 ? discPct : ''}
+                                      placeholder="0"
+                                      onFocus={e => e.target.select()}
+                                      onChange={e => updatePOItem(idx, 'discountPercent', e.target.value)}
+                                      className="w-full min-w-[75px] pr-5 px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-rose-600 text-right bg-white focus:border-rose-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <span className="absolute right-1.5 text-[10px] font-black text-rose-400 pointer-events-none">%</span>
+                                  </div>
                                 </td>
                                 <td className="px-6 py-3 text-right">
                                   <p className="text-[10px] font-bold text-slate-400 font-mono">Rs. {Number(product?.price || 0).toLocaleString()}</p>
                                 </td>
                                 <td className="px-6 py-3 text-right">
                                   <p className={`text-[10px] font-black font-mono ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString()}
+                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </p>
                                 </td>
                                 <td className="px-6 py-3 text-right">
-                                  <p className="text-[11px] font-black font-mono text-slate-900">Rs. {totalCost.toLocaleString()}</p>
+                                  <p className="text-[11px] font-black font-mono text-slate-900">Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                  {discPct > 0 && (
+                                    <p className="text-[8px] font-bold text-rose-500 font-mono">
+                                      -{discPct}% (-Rs. {discAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                    </p>
+                                  )}
                                 </td>
                                 <td className="px-6 py-3 text-center">
                                   <button onClick={() => removePOItem(idx)} className="w-8 h-8 flex items-center justify-center text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">✕</button>
@@ -1568,7 +1923,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                           })}
                           {poItems.length === 0 && (
                             <tr>
-                              <td colSpan={9} className="py-24 text-center">
+                              <td colSpan={10} className="py-24 text-center">
                                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em] italic leading-relaxed">
                                   MANIFEST VOID<br />
                                   <span className="tracking-widest opacity-50">Select items from catalog to initialize intake</span>

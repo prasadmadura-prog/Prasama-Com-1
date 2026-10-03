@@ -10,7 +10,12 @@ import {
   query,
   where,
   getDocs,
-  enableIndexedDbPersistence
+  enableIndexedDbPersistence,
+  limit as firestoreLimit,
+  orderBy as firestoreOrderBy,
+  getDocsFromCache,
+  getDocsFromServer,
+  startAfter
 } from 'firebase/firestore';
 
 export const collections = {
@@ -27,6 +32,7 @@ export const collections = {
   profile: 'p_v16_profile',
   users: 'p_v16_users',
   chequeHistory: 'p_v16_chequeHistory',
+  futureCheques: 'p_v16_futureCheques',
   fixedAssets: 'p_v16_fixedAssets'
 };
 
@@ -96,23 +102,103 @@ export async function uploadAllLocalDataToFirestore() {
 
 // --- FIRESTORE REAL-TIME IMPLEMENTATION ---
 
-export function subscribeToCollection(collectionName: string, callback: (data: any[]) => void) {
+/**
+ * Helper to select only specified fields from document data (simulated client-side projection).
+ */
+export function selectFields(data: any, fields: string[]): any {
+  if (!fields || fields.length === 0) return data;
+  const projected: any = { id: data.id };
+  fields.forEach(f => {
+    if (f in data) {
+      projected[f] = data[f];
+    }
+  });
+  return projected;
+}
+
+export function subscribeToCollection(
+  collectionName: string, 
+  callback: (data: any[]) => void,
+  fields?: string[]
+) {
   // Listen to the entire collection
   const q = query(collection(db, collectionName));
 
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const data: any[] = [];
     querySnapshot.forEach((doc) => {
-      data.push({ ...doc.data(), id: doc.id });
+      const docData = { ...doc.data(), id: doc.id };
+      data.push(fields ? selectFields(docData, fields) : docData);
     });
     callback(data);
   }, (error) => {
     console.error(`Error subscribing to ${collectionName}:`, error);
-    // Fallback: return empty or cached data? For now empty
     callback([]);
   });
 
   return unsubscribe;
+}
+
+export function subscribeToCollectionWithLimit(
+  collectionName: string,
+  limitCount: number,
+  orderByField: string,
+  callback: (data: any[]) => void,
+  fields?: string[]
+) {
+  const q = query(
+    collection(db, collectionName),
+    firestoreOrderBy(orderByField, 'desc'),
+    firestoreLimit(limitCount)
+  );
+
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const data: any[] = [];
+    querySnapshot.forEach((doc) => {
+      const docData = { ...doc.data(), id: doc.id };
+      data.push(fields ? selectFields(docData, fields) : docData);
+    });
+    callback(data);
+  }, (error) => {
+    console.error(`Error subscribing to ${collectionName} with limit ${limitCount}:`, error);
+    callback([]);
+  });
+
+  return unsubscribe;
+}
+
+export async function getDocsFromCacheOrServer(
+  collectionName: string, 
+  limitCount?: number, 
+  orderByField?: string,
+  fields?: string[]
+) {
+  let q = query(collection(db, collectionName));
+  if (orderByField) {
+    q = query(q, firestoreOrderBy(orderByField, 'desc'));
+  }
+  if (limitCount) {
+    q = query(q, firestoreLimit(limitCount));
+  }
+
+  try {
+    const snapshot = await getDocsFromCache(q);
+    if (!snapshot.empty) {
+      console.log(`Retrieved ${snapshot.size} docs from cache for ${collectionName}`);
+      return snapshot.docs.map(doc => {
+        const docData = { ...doc.data(), id: doc.id };
+        return fields ? selectFields(docData, fields) : docData;
+      });
+    }
+  } catch (e) {
+    console.warn(`Cache query failed/empty for ${collectionName}, falling back to server:`, e);
+  }
+
+  const snapshot = await getDocsFromServer(q);
+  return snapshot.docs.map(doc => {
+    const docData = { ...doc.data(), id: doc.id };
+    return fields ? selectFields(docData, fields) : docData;
+  });
 }
 
 export function subscribeToDocument(collectionName: string, docId: string, callback: (data: any) => void) {
@@ -148,7 +234,7 @@ export async function upsertDocument(collectionName: string, docId: string, data
   try {
     await setDoc(docRef, item, { merge: true });
   } catch (e) {
-    console.error("Error upserting document:", e);
+    console.error(`Error upserting document to ${collectionName}/${safeId}:`, e);
     throw e;
   }
 }

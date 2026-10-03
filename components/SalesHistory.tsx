@@ -19,6 +19,9 @@ interface SalesHistoryProps {
   clearJump?: () => void;
   purchaseOrders?: any[]; // Added to track non-transactional POs
   onResumeDraft?: (tx: Transaction) => void;
+  onCompleteSale?: (tx: Transaction) => Promise<void> | void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
 }
 
 const SalesHistory: React.FC<SalesHistoryProps> = ({
@@ -34,7 +37,10 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   jumpTarget,
   clearJump,
   purchaseOrders = [],
-  onResumeDraft
+  onResumeDraft,
+  onCompleteSale,
+  onLoadMore,
+  hasMore = false
 }) => {
   const getTodayLocal = () => {
     const d = new Date();
@@ -48,24 +54,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   const [endDate, setEndDate] = useState(today);
   const [activeTab, setActiveTab] = useState<'ALL' | 'PAID' | 'DUE' | 'DRAFTS'>('ALL');
 
-  // Special handling for salesprasama@gmail.com - default to ALL TERMINALS
-  const getDefaultCashierFilter = () => {
-    const userEmail = userProfile.email || userProfile.loginUsername || '';
-    if (userEmail.toLowerCase() === 'salesprasama@gmail.com') {
-      return 'ALL';
-    }
-    return userProfile.branch || 'ALL';
-  };
-
-  const [cashierFilter, setCashierFilter] = useState<'ALL' | string>(getDefaultCashierFilter());
-
-  // Sync filter with global branch selection (except for salesprasama@gmail.com)
-  useEffect(() => {
-    const userEmail = userProfile.email || userProfile.loginUsername || '';
-    if (userEmail.toLowerCase() !== 'salesprasama@gmail.com' && userProfile.branch) {
-      setCashierFilter(userProfile.branch);
-    }
-  }, [userProfile.branch, userProfile.email, userProfile.loginUsername]);
+  // Default to ALL TERMINALS for all users
+  const [cashierFilter, setCashierFilter] = useState<'ALL' | string>('ALL');
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -79,6 +69,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [tempItems, setTempItems] = useState<{ productId: string; quantity: number; price: number; discount?: number }[]>([]);
   const [tempTotal, setTempTotal] = useState(0);
+  const [postingTxId, setPostingTxId] = useState<string | null>(null);
+  const [isBatchPosting, setIsBatchPosting] = useState(false);
 
   const [showItemPicker, setShowItemPicker] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
@@ -294,23 +286,25 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       printWindow.document.write(`
             <html>
                 <body onload="window.print(); window.close();" style="font-family: 'JetBrains Mono', monospace; text-align: center; width: 72mm; padding: 4px; box-sizing: border-box; font-size: 9px;">
-                     <h3 style="margin: 1px 0; text-transform: uppercase;">${userProfile.companyName || userProfile.name}</h3>
-                     ${userProfile.companyAddress ? `<p style="margin: 0 0 2px 0; font-size: 8px;">${userProfile.companyAddress}</p>` : ''}
-                    <p style="margin: 1px 0;">CREDIT PAYMENT RECEIPT</p>
-                    <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    <p style="text-align: left; margin: 1px 0;">REF: ${tx.id}</p>
-                    <p style="text-align: left; margin: 1px 0;">DATE: ${formatDateTime(tx.date)}</p>
-                    <p style="text-align: left; margin: 1px 0; font-weight: 800;">CUS: ${getCustomerName(tx.customerId)}</p>
-                    <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    <h2 style="margin: 4px 0; font-size: 14px;">Rs. ${Number(tx.amount).toLocaleString()}</h2>
-                    <p style="margin: 1px 0; text-align: right; font-weight: 800;">BY: ${tx.paymentMethod}</p>
-                    <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
-                    <div style="font-size: 11px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
-                        * The advance payment for artworks is non-refundable.<br/>
-                        * Payments made for printouts or photocopies are non-refundable.<br/>
-                        * Exchanges are accepted on the same day only. No refunds will be provided.
-                    </div>
-                    <p style="font-size: 8px; font-weight: 800; margin-top: 8px;">THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS</p>
+                     <h3 style="margin: 1px 0; text-transform: uppercase; font-size: 17px; font-weight: 800;">${userProfile.companyName || userProfile.name}</h3>
+                     ${userProfile.companyAddress ? `<p style="margin: 0 0 2px 0; font-size: 11px; font-weight: 700; text-transform: uppercase;">${userProfile.companyAddress}</p>` : ''}
+                     <p style="margin: 1px 0; font-size: 11px; font-weight: 700; text-transform: uppercase;">${userProfile.branch}</p>
+                     ${userProfile.phone ? `<p style="margin: 1px 0; font-size: 11px; font-weight: 700; text-transform: uppercase;">PH: ${userProfile.phone}</p>` : ''}
+                     <p style="margin: 4px 0 1px 0; font-weight: 800;">CREDIT PAYMENT RECEIPT</p>
+                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+                     <p style="text-align: left; margin: 1px 0;">REF: ${tx.id}</p>
+                     <p style="text-align: left; margin: 1px 0;">DATE: ${formatDateTime(tx.date)}</p>
+                     <p style="text-align: left; margin: 1px 0; font-weight: 800;">CUS: ${getCustomerName(tx.customerId)}</p>
+                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+                     <h2 style="margin: 4px 0; font-size: 14px;">Rs. ${Number(tx.amount).toLocaleString()}</h2>
+                     <p style="margin: 1px 0; text-align: right; font-weight: 800;">BY: ${tx.paymentMethod}</p>
+                     <div style="border-top: 1px dashed #000; margin: 4px 0;"></div>
+                     <div style="font-size: 11px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
+                         * The advance payment for artworks is non-refundable.<br/>
+                         * Payments made for printouts or photocopies are non-refundable.<br/>
+                         * Exchanges are accepted on the same day only. No refunds will be provided.
+                     </div>
+                     <p style="font-size: 8px; font-weight: 800; margin-top: 8px; text-align: center;">~~~Thank You~~~</p>
                 </body>
             </html>
         `);
@@ -362,8 +356,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             .receipt-content { padding: 4px; box-sizing: border-box; width: 72mm; }
             .center { text-align: center; }
             .hr { border-top: 1px dashed #000; margin: 4px 0; }
-            .biz-name { font-size: 13px; font-weight: 800; text-transform: uppercase; margin: 1px 0; }
-            .biz-sub { font-size: 8px; font-weight: 700; text-transform: uppercase; }
+            .biz-name { font-size: 17px; font-weight: 800; text-transform: uppercase; margin: 1px 0; }
+            .biz-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; }
             .meta { font-size: 8px; margin: 4px 0; font-weight: 700; }
             table { width: 100%; border-collapse: collapse; table-layout: fixed; }
             th { border-bottom: 0.5px solid #000; padding-bottom: 2px; }
@@ -379,6 +373,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
               <div class="biz-name">${userProfile.companyName || userProfile.name}</div>
               ${userProfile.companyAddress ? `<div class="biz-sub" style="margin-bottom: 2px;">${userProfile.companyAddress}</div>` : ''}
               <div class="biz-sub">${userProfile.branch}</div>
+              ${userProfile.phone ? `<div class="biz-sub">PH: ${userProfile.phone}</div>` : ''}
             </div>
             <div class="hr"></div>
             <div class="meta">
@@ -414,6 +409,16 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
               <span>NET TOTAL:</span>
               <span>${tx.amount.toLocaleString()}</span>
             </div>
+            ${tx.paymentMethod === 'CASH' ? `
+            <div class="summary-row" style="margin-top: 4px;">
+              <span>CASH:</span>
+              <span>${Number(tx.cashReceived !== undefined ? tx.cashReceived : tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div class="summary-row">
+              <span>BALANCE:</span>
+              <span>${Number(tx.changeGiven !== undefined ? tx.changeGiven : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            ` : ''}
             <div class="hr"></div>
             <div style="font-size: 8px; text-align: right; font-weight: 800;">PAID BY: ${tx.paymentMethod}</div>
             <div style="font-size: 11px; text-align: left; margin: 10px 0 5px 0; font-weight: 700; line-height: 1.2;">
@@ -422,7 +427,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                 * Exchanges are accepted on the same day only. No refunds will be provided.
             </div>
             <div class="footer">
-                THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS
+                ~~~Thank You~~~
             </div>
           </div>
         </body>
@@ -977,16 +982,49 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
       <div className="flex gap-4 items-center">
         {activeTab === 'DRAFTS' && (
-          <button
-            onClick={() => {
-              if (confirm("Delete ALL draft entries? This cannot be undone.")) {
-                ledgerEntries.filter(t => t.status === 'DRAFT').forEach(t => onDeleteTransaction(t.id));
-              }
-            }}
-            className="px-6 py-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
-          >
-            🗑️ Clear All Drafts
-          </button>
+          <div className="flex gap-2">
+            {onCompleteSale && (
+              <button
+                disabled={isBatchPosting}
+                onClick={async () => {
+                  const drafts = ledgerEntries.filter(t => t.status === 'DRAFT' && t.type === 'SALE');
+                  if (drafts.length === 0) {
+                    alert("No draft sales found to post.");
+                    return;
+                  }
+                  if (confirm(`Post ALL ${drafts.length} draft entries as completed sales?\n\nThis will record revenue & profit, deduct stock, and credit cash.`)) {
+                    setIsBatchPosting(true);
+                    let postedCount = 0;
+                    try {
+                      for (const d of drafts) {
+                        await onCompleteSale(d);
+                        postedCount++;
+                      }
+                      alert(`Successfully posted ${postedCount} draft sales! All metrics have been updated.`);
+                      setActiveTab('ALL');
+                    } catch (err: any) {
+                      alert(`Posting stopped after ${postedCount} sales: ${err?.message || err}`);
+                    } finally {
+                      setIsBatchPosting(false);
+                    }
+                  }
+                }}
+                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xl shadow-emerald-500/20 active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <span>{isBatchPosting ? '⏳' : '✓'}</span> {isBatchPosting ? 'POSTING DRAFTS...' : 'POST ALL DRAFTS AS SALES'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                if (confirm("Delete ALL draft entries? This cannot be undone.")) {
+                  ledgerEntries.filter(t => t.status === 'DRAFT').forEach(t => onDeleteTransaction(t.id));
+                }
+              }}
+              className="px-6 py-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
+            >
+              🗑️ Clear All Drafts
+            </button>
+          </div>
         )}
         <button
           onClick={handleExportExcel}
@@ -1014,7 +1052,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             onChange={(e) => setCashierFilter(e.target.value)}
             className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none uppercase cursor-pointer hover:border-indigo-500 transition-all text-indigo-900"
           >
-            {userProfile.isAdmin && <option value="ALL">All Terminals</option>}
+            <option value="ALL">All Terminals</option>
             {userProfile.allBranches && userProfile.allBranches.length > 0 ? (
               userProfile.allBranches
                 .filter(b => {
@@ -1123,7 +1161,29 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
                     </td>
 
                     <td className="px-4 py-4 w-[10%] text-right">
-                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className={`flex justify-end items-center gap-1 ${tx.status === 'DRAFT' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                        {tx.status === 'DRAFT' && onCompleteSale && (
+                          <button
+                            disabled={postingTxId === tx.id}
+                            onClick={async () => {
+                              if (confirm(`Post this draft sale of Rs. ${Number(tx.amount || 0).toLocaleString()} as a completed sale?`)) {
+                                setPostingTxId(tx.id);
+                                try {
+                                  await onCompleteSale(tx);
+                                  alert(`✅ Draft sale ${tx.id} of Rs. ${Number(tx.amount || 0).toLocaleString()} posted successfully as COMPLETED!`);
+                                } catch (err: any) {
+                                  alert(`Failed to post sale: ${err?.message || err}`);
+                                } finally {
+                                  setPostingTxId(null);
+                                }
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black uppercase tracking-wider shadow-sm flex items-center gap-1 transition-all mr-1 disabled:opacity-50 cursor-pointer"
+                            title="Complete & Post Sale"
+                          >
+                            <span>{postingTxId === tx.id ? '⏳' : '✅'}</span> {postingTxId === tx.id ? 'Posting...' : 'Post'}
+                          </button>
+                        )}
                         <button onClick={() => {
                           if (tx.type === 'SALE' && onResumeDraft) {
                             onResumeDraft(tx);

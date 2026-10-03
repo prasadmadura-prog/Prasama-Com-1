@@ -6,8 +6,8 @@ export const formatDate = (date: string | Date | undefined | null): string => {
     const d = new Date(date);
     if (isNaN(d.getTime())) return '';
 
-    // Use Intl.DateTimeFormat to always render in Sri Lanka timezone
-    const parts = new Intl.DateTimeFormat(LK_LOCALE, {
+    // Use Intl.DateTimeFormat to render MM/DD/YYYY in Sri Lanka timezone
+    const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: LK_TZ,
         day: '2-digit',
         month: '2-digit',
@@ -15,7 +15,16 @@ export const formatDate = (date: string | Date | undefined | null): string => {
     }).formatToParts(d);
 
     const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
-    return `${get('day')}/${get('month')}/${get('year')}`;
+    return `${get('month')}/${get('day')}/${get('year')}`;
+};
+
+export const formatMMDDYYYY = (date: string | Date | number | undefined | null): string => {
+    if (!date) return '';
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        const [y, m, d] = date.split('-');
+        return `${m}/${d}/${y}`;
+    }
+    return formatDate(date);
 };
 
 export const formatDateTime = (date: string | Date | undefined | null): string => {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import JsBarcode from 'jsbarcode';
 import { Product, Category, Vendor, UserProfile } from '../types';
 
@@ -14,6 +14,8 @@ interface InventoryProps {
   onUpsertProduct: (product: Product) => void;
   onBulkUpsertProducts: (products: Product[]) => void;
   onDeleteProduct: (id: string) => void;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
 }
 
 const Inventory: React.FC<InventoryProps> = ({
@@ -26,7 +28,9 @@ const Inventory: React.FC<InventoryProps> = ({
   onDeleteCategory,
   onUpsertProduct,
   onBulkUpsertProducts,
-  onDeleteProduct
+  onDeleteProduct,
+  onLoadMore,
+  hasMore = false
 }) => {
   const [filterCategoryId, setFilterCategoryId] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,6 +40,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [activeTab, setActiveTab] = useState<'ITEMS' | 'CATEGORIES'>('ITEMS');
   const [saveStatus, setSaveStatus] = useState<'IDLE' | 'SAVING' | 'SUCCESS'>('IDLE');
+  const [selectedBranch, setSelectedBranch] = useState<string>('ALL CASHIERS');
 
   // Pagination State - Products
   const [currentPage, setCurrentPage] = useState(1);
@@ -56,6 +61,9 @@ const Inventory: React.FC<InventoryProps> = ({
   const [costValue, setCostValue] = useState<number>(0);
   const [priceValue, setPriceValue] = useState<number>(0);
   const [skuValue, setSkuValue] = useState('');
+  const [imageUrlValue, setImageUrlValue] = useState<string>('');
+  const [branchStocksState, setBranchStocksState] = useState<Record<string, number>>({});
+  const [selectedStoreForStock, setSelectedStoreForStock] = useState<string>('CASHIER 1');
 
 
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -65,40 +73,77 @@ const Inventory: React.FC<InventoryProps> = ({
   const [viewingCategory, setViewingCategory] = useState<Category | null>(null);
 
   const importInputRef = useRef<HTMLInputElement>(null);
-  const barcodePreviewRef = useRef<HTMLCanvasElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const barcodeCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 400;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        setImageUrlValue(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
-    if (isModalOpen && barcodePreviewRef.current && skuValue) {
-      try {
-        const isNumeric = /^\d+$/.test(skuValue);
-        const isEAN = skuValue.length === 13 && isNumeric;
-        const isUPC = skuValue.length === 12 && isNumeric;
-        let format = isEAN ? 'EAN13' : (isUPC ? 'UPC' : 'CODE128');
+    if (isModalOpen && skuValue) {
+      const timer = setTimeout(() => {
+        if (barcodeCanvasRef.current) {
+          try {
+            const isNumeric = /^\d+$/.test(skuValue);
+            const isEAN = skuValue.length === 13 && isNumeric;
+            const isUPC = skuValue.length === 12 && isNumeric;
+            const format = isEAN ? 'EAN13' : (isUPC ? 'UPC' : 'CODE128');
 
-        try {
-          JsBarcode(barcodePreviewRef.current, skuValue, {
-            format: format,
-            width: 1.5,
-            height: 40,
-            displayValue: true,
-            fontSize: 12,
-            margin: 0,
-            background: 'transparent'
-          });
-        } catch(e) {
-          JsBarcode(barcodePreviewRef.current, skuValue, {
-            format: 'CODE128',
-            width: 1.5,
-            height: 40,
-            displayValue: true,
-            fontSize: 12,
-            margin: 0,
-            background: 'transparent'
-          });
+            let valueToRender = skuValue;
+            if (isEAN) {
+              valueToRender = skuValue.slice(0, 12);
+            } else if (isUPC) {
+              valueToRender = skuValue.slice(0, 11);
+            }
+
+            JsBarcode(barcodeCanvasRef.current, valueToRender, {
+              format: format,
+              width: 1.8,
+              height: 35,
+              displayValue: true,
+              fontSize: 12,
+              margin: 5,
+              background: '#ffffff',
+              lineColor: '#000000'
+            });
+          } catch (err) {
+            // Ignore rendering errors
+          }
         }
-      } catch (err) {
-        // Fallback or ignore if it can't render
-      }
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [skuValue, isModalOpen]);
 
@@ -108,9 +153,26 @@ const Inventory: React.FC<InventoryProps> = ({
       setCostValue(editingProduct.cost || 0);
       setPriceValue(editingProduct.price || 0);
       setSkuValue(editingProduct.sku);
+      setImageUrlValue(editingProduct.imageUrl || '');
+      const initialStocks = editingProduct.branchStocks ? { ...editingProduct.branchStocks } : {
+        'CASHIER 1': editingProduct.stock || 0,
+        'CASHIER 2': 0,
+        'CASHIER 3': 0,
+        'CASHIER 4': 0
+      };
+      setBranchStocksState(initialStocks);
+      setSelectedStoreForStock('CASHIER 1');
     } else {
       setCostValue(0);
       setPriceValue(0);
+      setImageUrlValue('');
+      setBranchStocksState({
+        'CASHIER 1': 0,
+        'CASHIER 2': 0,
+        'CASHIER 3': 0,
+        'CASHIER 4': 0
+      });
+      setSelectedStoreForStock('CASHIER 1');
       if (categories.length > 0 && !selectedCategoryId) {
         setSelectedCategoryId(categories[0].id);
       }
@@ -119,6 +181,21 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [editingProduct, categories, isModalOpen]);
+
+  const storeOptions = useMemo(() => {
+    const defaults = ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4', 'MAIN STORE'];
+    const userBranches = userProfile?.allBranches || [];
+    const existingKeys = Object.keys(branchStocksState || {});
+    const combined = Array.from(new Set([...defaults, ...userBranches, ...existingKeys]));
+    return combined.filter(Boolean);
+  }, [userProfile?.allBranches, branchStocksState]);
+
+  const handleBranchStockChange = (store: string, qty: number) => {
+    setBranchStocksState(prev => ({
+      ...prev,
+      [store]: qty < 0 ? 0 : qty
+    }));
+  };
 
   const handleCostChange = (val: number) => {
     setCostValue(val);
@@ -193,10 +270,15 @@ const Inventory: React.FC<InventoryProps> = ({
         const matchesCategory = filterCategoryId === 'All' || p.categoryId === filterCategoryId;
         const matchesSearch = (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
           (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
-        return matchesCategory && matchesSearch;
+        
+        // Filter by selected cashier's stock (> 0) if a specific cashier is selected
+        const branchStock = p.branchStocks ? (Number(p.branchStocks[selectedBranch]) || 0) : (Number(p.stock) || 0);
+        const matchesBranch = selectedBranch === 'ALL CASHIERS' || branchStock > 0;
+
+        return matchesCategory && matchesSearch && matchesBranch;
       })
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [products, filterCategoryId, searchTerm]);
+  }, [products, filterCategoryId, searchTerm, selectedBranch]);
 
   const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
   const paginatedProducts = useMemo(() => {
@@ -223,11 +305,12 @@ const Inventory: React.FC<InventoryProps> = ({
     const finalSku = skuValue.trim() || getNextSku();
 
 
-    const bStocks: Record<string, number> = { ...(editingProduct?.branchStocks || {}) };
-    bStocks['CASHIER 1'] = parseInt(formData.get('stock_cashier1') as string) || 0;
-    bStocks['CASHIER 2'] = parseInt(formData.get('stock_cashier2') as string) || 0;
-    bStocks['CASHIER 3'] = parseInt(formData.get('stock_cashier3') as string) || 0;
-    bStocks['CASHIER 4'] = parseInt(formData.get('stock_cashier4') as string) || 0;
+    const bStocks: Record<string, number> = { ...branchStocksState };
+    ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].forEach(b => {
+      if (bStocks[b] === undefined) bStocks[b] = 0;
+    });
+
+    const totalCalculatedStock = Object.values(bStocks).reduce((a, b) => a + (Number(b) || 0), 0);
 
     const productData: Product = {
       id: editingProduct?.id || `P-${Date.now()}`,
@@ -238,9 +321,14 @@ const Inventory: React.FC<InventoryProps> = ({
       cost: costValue,
       price: priceValue,
       branchStocks: bStocks,
-      stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(bStocks[b]) || 0), 0),
+      stock: totalCalculatedStock,
       lowStockThreshold: parseInt(formData.get('lowStockThreshold') as string) || 5,
       internalNotes: (formData.get('internalNotes') as string) || '',
+      extraDetails: (formData.get('extraDetails') as string) || '',
+      sinhalaName: (formData.get('sinhalaName') as string) || '',
+      c4FreeText: (formData.get('c4FreeText') as string) || '',
+      c4FreeTextSinhala: (formData.get('c4FreeTextSinhala') as string) || '',
+      imageUrl: imageUrlValue.trim() || undefined,
     };
 
     try {
@@ -309,7 +397,8 @@ const Inventory: React.FC<InventoryProps> = ({
             categoryId: catId,
             vendorId: vendors.find(v => v.name.toUpperCase() === String(item['primary vendor'] || item.vendor || '').toUpperCase())?.id || item.vendor_id || '',
             lowStockThreshold: parseInt(item.alert_threshold || item.threshold) || 5,
-            internalNotes: `Imported: ${new Date().toLocaleDateString()}`
+            internalNotes: `Imported: ${new Date().toLocaleDateString()}`,
+            extraDetails: item.extraDetails || item.extra_details || ''
           };
         });
 
@@ -397,14 +486,21 @@ const Inventory: React.FC<InventoryProps> = ({
               <option value="All">All Categories</option>
               {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
             </select>
+            <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="px-8 py-4 rounded-[2rem] border border-slate-200 text-xs font-black uppercase bg-white cursor-pointer focus:border-indigo-500 transition-all">
+              <option value="ALL CASHIERS">ALL CASHIERS</option>
+              {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']).map(branch => (
+                <option key={branch} value={branch}>{branch}</option>
+              ))}
+            </select>
           </div>
 
           {/* Inventory Valuation Summary Bar */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2">
             {(() => {
               const stats = filteredProducts.reduce((acc, p) => {
-                const bStock = p.branchStocks ? (Number(p.branchStocks[userProfile.branch]) || 0) : (Number(p.stock) || 0);
+                const isAll = selectedBranch === 'ALL CASHIERS';
                 const gStock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (Number(p.stock) || 0);
+                const bStock = isAll ? gStock : (p.branchStocks ? (Number(p.branchStocks[selectedBranch]) || 0) : (Number(p.stock) || 0));
 
                 return {
                   unitsBranch: acc.unitsBranch + bStock,
@@ -423,17 +519,17 @@ const Inventory: React.FC<InventoryProps> = ({
                     <p className="text-xl font-black text-slate-900 leading-none">{filteredProducts.length} <span className="text-xs text-slate-400">Products</span></p>
                   </div>
                   <div className="bg-indigo-600 p-6 rounded-[2rem] shadow-xl shadow-indigo-100 flex flex-col justify-center text-white">
-                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Filtered Stock (Branch)</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Filtered Stock ({selectedBranch})</p>
                     <p className="text-xl font-black leading-none">{stats.unitsBranch.toLocaleString()} <span className="text-xs opacity-60">Units</span></p>
                     <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: {stats.unitsGlobal.toLocaleString()} Units</p>
                   </div>
                   <div className="bg-emerald-600 p-6 rounded-[2rem] shadow-xl shadow-emerald-100 flex flex-col justify-center text-white">
-                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Retail Value (Branch)</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Retail Value ({selectedBranch})</p>
                     <p className="text-xl font-black leading-none">Rs. {Math.round(stats.valueRetailBranch).toLocaleString()}</p>
                     <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: Rs. {Math.round(stats.valueRetailGlobal).toLocaleString()}</p>
                   </div>
                   <div className="bg-amber-500 p-6 rounded-[2rem] shadow-xl shadow-amber-100 flex flex-col justify-center text-white">
-                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Cost Valuation (Branch)</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest mb-1 opacity-70">Cost Valuation ({selectedBranch})</p>
                     <p className="text-xl font-black leading-none">Rs. {Math.round(stats.valueCostBranch).toLocaleString()}</p>
                     <p className="text-[8px] font-black uppercase mt-1 opacity-50">Global: Rs. {Math.round(stats.valueCostGlobal).toLocaleString()}</p>
                   </div>
@@ -449,10 +545,16 @@ const Inventory: React.FC<InventoryProps> = ({
                   <th className="px-10 py-6">Identity / SKU</th>
                   <th className="px-10 py-6">Classification</th>
                   <th className="px-10 py-6 text-right">LKR Value</th>
-                  <th className="px-4 py-6 text-center">Cashier 1</th>
-                  <th className="px-4 py-6 text-center">Cashier 2</th>
-                  <th className="px-4 py-6 text-center">Cashier 3</th>
-                  <th className="px-4 py-6 text-center">Cashier 4</th>
+                  {selectedBranch === 'ALL CASHIERS' ? (
+                    <>
+                      <th className="px-4 py-6 text-center">Cashier 1</th>
+                      <th className="px-4 py-6 text-center">Cashier 2</th>
+                      <th className="px-4 py-6 text-center">Cashier 3</th>
+                      <th className="px-4 py-6 text-center">Cashier 4</th>
+                    </>
+                  ) : (
+                    <th className="px-8 py-6 text-center">{selectedBranch}</th>
+                  )}
                   <th className="px-6 py-6 text-center">Total</th>
                   <th className="px-10 py-6 text-center">Action</th>
                 </tr>
@@ -461,36 +563,58 @@ const Inventory: React.FC<InventoryProps> = ({
                 {paginatedProducts.map(p => (
                   <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
                     <td className="px-10 py-4">
-                      <p className="font-black text-slate-900 text-[13px] uppercase mb-1 tracking-tight leading-none">{p.name}</p>
-                      <div className="flex gap-2 items-center">
-                        <p className="font-mono text-[10px] font-black text-indigo-500 tracking-tighter opacity-80">{p.sku}</p>
-                        {p.internalNotes && <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest pl-2 border-l border-slate-200">{p.internalNotes}</span>}
+                      <div className="flex items-center gap-3">
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt={p.name} className="w-10 h-10 object-cover rounded-xl border border-slate-200 shrink-0 bg-white shadow-sm" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 text-slate-400 font-black text-xs">
+                            {p.name?.[0] || '📦'}
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-black text-slate-900 text-[13px] uppercase mb-1 tracking-tight leading-none">{p.name}</p>
+                          <div className="flex gap-2 items-center">
+                            <p className="font-mono text-[10px] font-black text-indigo-500 tracking-tighter opacity-80">{p.sku}</p>
+                            {p.internalNotes && <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest pl-2 border-l border-slate-200">Note: {p.internalNotes}</span>}
+                            {p.extraDetails && <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest pl-2 border-l border-slate-200">Extra: {p.extraDetails}</span>}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td className="px-10 py-4">
                       <span className="text-[10px] font-black text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">{getCategoryName(p.categoryId)}</span>
                     </td>
                     <td className="px-10 py-4 text-right font-black text-slate-900 font-mono text-[13px]">Rs. {Number(p.price).toLocaleString()}</td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${((p.branchStocks?.['CASHIER 1'] ?? p.stock) || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
-                        {p.branchStocks?.['CASHIER 1'] ?? p.stock}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 2'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
-                        {p.branchStocks?.['CASHIER 2'] || 0}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 3'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
-                        {p.branchStocks?.['CASHIER 3'] || 0}
-                      </span>
-                    </td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 4'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
-                        {p.branchStocks?.['CASHIER 4'] || 0}
-                      </span>
-                    </td>
+                    {selectedBranch === 'ALL CASHIERS' ? (
+                      <>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${((p.branchStocks?.['CASHIER 1'] ?? p.stock) || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                            {p.branchStocks?.['CASHIER 1'] ?? p.stock}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 2'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                            {p.branchStocks?.['CASHIER 2'] || 0}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 3'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                            {p.branchStocks?.['CASHIER 3'] || 0}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-center">
+                          <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.['CASHIER 4'] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                            {p.branchStocks?.['CASHIER 4'] || 0}
+                          </span>
+                        </td>
+                      </>
+                    ) : (
+                      <td className="px-8 py-4 text-center">
+                        <span className={`px-3 py-1 rounded-lg text-[11px] font-black ${(p.branchStocks?.[selectedBranch] || 0) <= p.lowStockThreshold ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-900'}`}>
+                          {p.branchStocks?.[selectedBranch] || 0}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-6 py-4 text-center">
                       <div className="flex flex-col items-center">
                         {(() => {
@@ -619,7 +743,7 @@ const Inventory: React.FC<InventoryProps> = ({
       {/* Product Asset Modal */}
       {
         isModalOpen && (
-          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-950/95 backdrop-blur-xl overflow-y-auto">
+          <div className="fixed inset-0 z-[100] flex justify-center items-start p-4 bg-slate-950/95 backdrop-blur-xl overflow-y-auto">
             <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-xl overflow-hidden animate-in zoom-in duration-300 my-8">
               <div className="p-10 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
                 <div className="flex-1">
@@ -642,9 +766,75 @@ const Inventory: React.FC<InventoryProps> = ({
                 <div className="space-y-3">
                   
                   {/* Generated Barcode Display Positioned Above Nomenclature */}
-                  <div className="flex justify-center items-center w-full py-2 bg-slate-50/50 rounded-2xl border border-slate-100 border-dashed mb-1">
-                     <canvas ref={barcodePreviewRef} className="h-14 w-auto object-contain mix-blend-multiply opacity-90" />
+                  <div className="flex justify-center items-center w-full py-1 bg-white rounded-2xl border border-slate-100 border-dashed mb-1 h-20">
+                     <canvas ref={barcodeCanvasRef} />
                   </div>
+
+                  {/* Asset Thumbnail / Image Attachment */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">
+                      📷 Asset Thumbnail / Product Image
+                    </label>
+                    <div className="flex items-center gap-4">
+                      {imageUrlValue ? (
+                        <div className="relative group shrink-0">
+                          <img
+                            src={imageUrlValue}
+                            alt="Thumbnail"
+                            className="w-16 h-16 object-cover rounded-2xl border-2 border-indigo-500 shadow-md bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setImageUrlValue('')}
+                            className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold shadow hover:bg-rose-700"
+                            title="Remove Image"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-2xl border-2 border-dashed border-slate-300 flex items-center justify-center bg-white shrink-0 text-slate-300">
+                          <span className="text-2xl">🖼️</span>
+                        </div>
+                      )}
+
+                      <div className="flex-1 space-y-2">
+                        <input
+                          type="file"
+                          ref={imageFileInputRef}
+                          onChange={handleImageFileChange}
+                          accept="image/*"
+                          className="hidden"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => imageFileInputRef.current?.click()}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5"
+                          >
+                            <span>📁</span> Attach Image / Photo
+                          </button>
+                          {imageUrlValue && (
+                            <button
+                              type="button"
+                              onClick={() => setImageUrlValue('')}
+                              className="px-3 py-2 bg-slate-200 hover:bg-rose-100 hover:text-rose-600 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="OR PASTE IMAGE URL..."
+                          value={imageUrlValue}
+                          onChange={(e) => setImageUrlValue(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-[11px] font-mono outline-none bg-white text-slate-700 focus:border-indigo-500 transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asset Nomenclature</label>
                     <input name="name" placeholder="E.G. A4 DOUBLE A 80GSM" defaultValue={editingProduct?.name} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black outline-none bg-white text-slate-800 uppercase text-[13px] focus:border-indigo-500 transition-all shadow-sm" />
@@ -687,48 +877,71 @@ const Inventory: React.FC<InventoryProps> = ({
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-3 col-span-2">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Stock Distribution</label>
-                       <div className="grid grid-cols-4 gap-3">
-                          <div className="space-y-1">
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 1</p>
-                            <input
-                              name="stock_cashier1"
-                              type="number"
-                              defaultValue={editingProduct?.branchStocks?.['CASHIER 1'] ?? (editingProduct?.stock || 0)}
-                              required
-                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 2</p>
-                            <input
-                              name="stock_cashier2"
-                              type="number"
-                              defaultValue={editingProduct?.branchStocks?.['CASHIER 2'] || 0}
-                              required
-                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 3</p>
-                            <input
-                              name="stock_cashier3"
-                              type="number"
-                              defaultValue={editingProduct?.branchStocks?.['CASHIER 3'] || 0}
-                              required
-                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-tighter ml-1">Cashier 4</p>
-                            <input
-                              name="stock_cashier4"
-                              type="number"
-                              defaultValue={editingProduct?.branchStocks?.['CASHIER 4'] || 0}
-                              required
-                              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none bg-white"
-                            />
-                          </div>
+                       <div className="flex justify-between items-center">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Stock Distribution</label>
+                         <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-100">
+                           Total: {Object.values(branchStocksState).reduce((a, b) => a + (Number(b) || 0), 0)} Units
+                         </span>
+                       </div>
+
+                       <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                         <div className="space-y-1">
+                           <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 block">
+                             🏪 Store Select
+                           </label>
+                           <select
+                             value={selectedStoreForStock}
+                             onChange={(e) => setSelectedStoreForStock(e.target.value)}
+                             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-bold font-mono text-[13px] outline-none bg-white text-slate-800 focus:border-indigo-500 transition-all cursor-pointer uppercase shadow-sm"
+                           >
+                             {storeOptions.map(store => (
+                               <option key={store} value={store}>
+                                 {store} ({branchStocksState[store] || 0} units)
+                               </option>
+                             ))}
+                           </select>
+                         </div>
+
+                         <div className="space-y-1">
+                           <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 block">
+                             📦 Qty Box ({selectedStoreForStock})
+                           </label>
+                           <input
+                             type="number"
+                             min="0"
+                             value={branchStocksState[selectedStoreForStock] ?? 0}
+                             onChange={(e) => handleBranchStockChange(selectedStoreForStock, parseInt(e.target.value) || 0)}
+                             placeholder="Enter Qty..."
+                             required
+                             className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-black font-mono text-[14px] outline-none bg-white text-slate-900 focus:border-indigo-500 transition-all shadow-sm"
+                           />
+                         </div>
+
+                         <div className="col-span-2 pt-2 flex flex-wrap gap-2 border-t border-slate-200/60 mt-1">
+                           {storeOptions.map(store => {
+                             const qty = branchStocksState[store] || 0;
+                             const isSelected = selectedStoreForStock === store;
+                             return (
+                               <button
+                                 type="button"
+                                 key={store}
+                                 onClick={() => setSelectedStoreForStock(store)}
+                                 className={`px-3 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center gap-1.5 ${
+                                   isSelected
+                                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 scale-105'
+                                     : 'bg-white text-slate-700 border border-slate-200 hover:border-indigo-300'
+                                 }`}
+                               >
+                                 <span>{store}</span>
+                                 <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                                   isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-800'
+                                 }`}>
+                                   {qty}
+                                 </span>
+                               </button>
+                             );
+                           })}
+                         </div>
                        </div>
                     </div>
                     <div className="space-y-1">
@@ -737,9 +950,35 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Internal Notes / Extra Details</label>
-                    <textarea name="internalNotes" defaultValue={editingProduct?.internalNotes} rows={2} placeholder="ADDITIONAL SPECIFICATIONS..." className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-bold outline-none bg-white text-slate-800 uppercase text-[12px] focus:border-indigo-500 transition-all shadow-sm resize-y" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Internal Notes</label>
+                      <textarea name="internalNotes" defaultValue={editingProduct?.internalNotes} rows={2} placeholder="INTERNAL MEMOS..." className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-bold outline-none bg-white text-slate-800 uppercase text-[12px] focus:border-indigo-500 transition-all shadow-sm resize-y" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Extra Details</label>
+                      <textarea name="extraDetails" defaultValue={editingProduct?.extraDetails} rows={2} placeholder="PRINTS ON BARCODE..." className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-bold outline-none bg-white text-slate-800 uppercase text-[12px] focus:border-indigo-500 transition-all shadow-sm resize-y" />
+                    </div>
+                  </div>
+
+                  <div className="bg-indigo-50/40 p-5 rounded-[1.8rem] border border-indigo-100/50 space-y-4">
+                    <h4 className="text-[10px] font-black text-indigo-700 uppercase tracking-wider">Cashier 4 Label Settings</h4>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Sinhala Name</label>
+                        <input name="sinhalaName" placeholder="e.g. කොණ්ඩ කඩල" defaultValue={editingProduct?.sinhalaName} className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 font-bold outline-none text-slate-800 text-[12px] focus:border-indigo-500 transition-all shadow-sm" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Free Text (Eng)</label>
+                          <input name="c4FreeText" placeholder="e.g. Specially Packed" defaultValue={editingProduct?.c4FreeText} className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 font-bold outline-none text-slate-800 text-[12px] focus:border-indigo-500 transition-all shadow-sm" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Free Text (Sin)</label>
+                          <input name="c4FreeTextSinhala" placeholder="e.g. විශේෂයෙන් ඇසුරුම් කරන ලදී" defaultValue={editingProduct?.c4FreeTextSinhala} className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 font-bold outline-none text-slate-800 text-[12px] focus:border-indigo-500 transition-all shadow-sm" />
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="space-y-1">

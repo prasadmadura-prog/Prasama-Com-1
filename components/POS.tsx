@@ -45,6 +45,16 @@ const POS: React.FC<POSProps> = ({
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<any>(null);
   const [activeTerminal, setActiveTerminal] = useState(userProfile.branch || 'CASHIER 1'); // State for active terminal
+  const completedTxIdsRef = useRef<Set<string>>(new Set());
+
+  const getAvailableStock = (product: Product) => {
+    if (product.branchStocks && Object.keys(product.branchStocks).length > 0) {
+      return product.branchStocks[activeTerminal] !== undefined
+        ? Number(product.branchStocks[activeTerminal])
+        : 0;
+    }
+    return Number(product.stock || 0);
+  };
 
   const getProductBySkuOrId = (term: string) => {
     const trimmed = term.trim();
@@ -132,13 +142,14 @@ const POS: React.FC<POSProps> = ({
         (p.name || "").toLowerCase().includes(search.toLowerCase()) ||
         (p.sku || "").toLowerCase().includes(search.toLowerCase()) ||
         (p.sku || "").toLowerCase().includes(baseSearch.toLowerCase()) ||
-        (p.internalNotes || "").toLowerCase().includes(search.toLowerCase());
+        (p.internalNotes || "").toLowerCase().includes(search.toLowerCase()) ||
+        (p.extraDetails || "").toLowerCase().includes(search.toLowerCase());
 
       const matchesCat = !categoryId || categoryId === 'All' || p.categoryId === categoryId;
 
       return matchesSearch && matchesCat;
     }).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  }, [search, categoryId, products]);
+  }, [search, categoryId, products, activeTerminal]);
 
   const filteredCustomers = useMemo(() => customers.filter(c => c && c.name && (c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.phone && c.phone.includes(customerSearch)))), [customers, customerSearch]);
 
@@ -239,6 +250,169 @@ const POS: React.FC<POSProps> = ({
     return { realizedInflow, dueAmount, profit: globalProfit, reloadSales: totalReloadSales, branchBreakdown, branchStats };
   }, [transactions, today, products, categories]);
 
+  const quickAddItems = useMemo(() => {
+    // 1. Gather all sales transactions (not draft, not void)
+    const sales = (transactions || []).filter(t => 
+      t && 
+      t.type === 'SALE' && 
+      t.status !== 'DRAFT' && 
+      t.status !== 'VOID'
+    );
+
+    // Helper function to get top products from a list of transactions
+    const getTopProducts = (txs: typeof sales, terminalFilter?: string) => {
+      const productStats: Record<string, { qty: number, lastDate: number, id: string, name: string }> = {};
+      
+      txs.forEach(t => {
+        const matchesTerminal = !terminalFilter || 
+          (t.branchId || '').toUpperCase().trim() === terminalFilter.toUpperCase().trim();
+          
+        if (!matchesTerminal) return;
+
+        const txTime = t.date ? new Date(t.date).getTime() : 0;
+        
+        (t.items || []).forEach(item => {
+          if (!item.productId) return;
+          const prod = products.find(p => p.id === item.productId);
+          if (!prod) return;
+
+          if (!productStats[item.productId]) {
+            productStats[item.productId] = {
+              qty: 0,
+              lastDate: 0,
+              id: item.productId,
+              name: prod.name || ''
+            };
+          }
+          productStats[item.productId].qty += Number(item.quantity || 0);
+          if (txTime > productStats[item.productId].lastDate) {
+            productStats[item.productId].lastDate = txTime;
+          }
+        });
+      });
+
+      // Sort by quantity sold descending, then by last sold date descending
+      return Object.values(productStats).sort((a, b) => {
+        if (b.qty !== a.qty) return b.qty - a.qty;
+        return b.lastDate - a.lastDate;
+      });
+    };
+
+    // 2. Get top products for the active terminal
+    const terminalTop = getTopProducts(sales, activeTerminal);
+    
+    // 3. Get overall top products (across all terminals) for filling
+    const overallTop = getTopProducts(sales);
+
+    // 4. Build list of unique product IDs
+    const selectedProductIds = new Set<string>();
+    const finalItems: Array<{ id: string; type: 'product' | 'reload'; name: string }> = [];
+
+    // Add terminal-specific top items first
+    terminalTop.forEach(item => {
+      if (selectedProductIds.size < 4) {
+        selectedProductIds.add(item.id);
+        const isReload = item.name.toUpperCase().startsWith('RELOAD ');
+        finalItems.push({
+          id: item.id,
+          type: isReload ? 'reload' : 'product',
+          name: item.name
+        });
+      }
+    });
+
+    // Fill with overall top items if we have less than 4
+    if (selectedProductIds.size < 4) {
+      overallTop.forEach(item => {
+        if (selectedProductIds.size < 4 && !selectedProductIds.has(item.id)) {
+          selectedProductIds.add(item.id);
+          const isReload = item.name.toUpperCase().startsWith('RELOAD ');
+          finalItems.push({
+            id: item.id,
+            type: isReload ? 'reload' : 'product',
+            name: item.name
+          });
+        }
+      });
+    }
+
+    // 5. Fallback defaults if we still have less than 4 items
+    const defaults = [
+      { name: 'PHOTOCOPY D/S', isReload: false },
+      { name: 'RELOAD MOBITEL', isReload: true },
+      { name: 'RELOAD AIRTEL', isReload: true },
+      { name: 'RELOAD HUTCH', isReload: true }
+    ];
+
+    defaults.forEach(def => {
+      if (selectedProductIds.size < 4) {
+        const matchingProduct = products.find(p => p.name === def.name);
+        const productId = matchingProduct ? matchingProduct.id : `fallback-${def.name}`;
+        
+        if (!selectedProductIds.has(productId)) {
+          selectedProductIds.add(productId);
+          finalItems.push({
+            id: productId,
+            type: def.isReload ? 'reload' : 'product',
+            name: def.name
+          });
+        }
+      }
+    });
+
+    // 6. Map to the display format with styles
+    return finalItems.slice(0, 4).map(item => {
+      const isReload = item.type === 'reload';
+      let provider = '';
+      if (isReload) {
+        // Extract provider name after 'RELOAD '
+        provider = item.name.substring(7).toUpperCase().trim();
+      }
+
+      let color = 'bg-slate-800 text-white border-slate-800';
+      let hover = 'hover:bg-slate-700';
+      let icon = '📄';
+      let label = 'Quick Add';
+
+      if (isReload) {
+        label = 'Hot Reload';
+        icon = '📶';
+        if (provider === 'MOBITEL') {
+          color = 'bg-[#0056b3] text-white border-[#0056b3]';
+          hover = 'hover:bg-[#004494]';
+        } else if (provider === 'AIRTEL') {
+          color = 'bg-[#e53935] text-white border-[#e53935]';
+          hover = 'hover:bg-[#c62828]';
+        } else if (provider === 'HUTCH') {
+          color = 'bg-[#ff9800] text-white border-[#ff9800]';
+          hover = 'hover:bg-[#f57c00]';
+        } else {
+          color = 'bg-indigo-600 text-white border-indigo-600';
+          hover = 'hover:bg-indigo-700';
+        }
+      } else {
+        if (item.name === 'PHOTOCOPY D/S') {
+          color = 'bg-slate-800 text-white border-slate-800';
+          hover = 'hover:bg-slate-700';
+        } else {
+          color = 'bg-slate-700 text-white border-slate-700';
+          hover = 'hover:bg-slate-600';
+        }
+      }
+
+      return {
+        productId: item.id,
+        displayName: isReload ? provider : item.name,
+        fullName: item.name,
+        type: item.type,
+        color,
+        hover,
+        icon,
+        label,
+        provider
+      };
+    });
+  }, [transactions, activeTerminal, products]);
 
   const totals = useMemo(() => {
     let gross = 0;
@@ -281,11 +455,7 @@ const POS: React.FC<POSProps> = ({
     holdIntervalRef.current = null;
   };
 
-  const getAvailableStock = (product: Product) => {
-    return product.branchStocks && product.branchStocks[activeTerminal] !== undefined
-      ? Number(product.branchStocks[activeTerminal])
-      : Number(product.stock || 0);
-  };
+  // getAvailableStock is defined at the top of the component
 
   const addToCart = (product: Product) => {
     const availableStock = getAvailableStock(product);
@@ -417,6 +587,10 @@ const POS: React.FC<POSProps> = ({
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (cart.length > 0 && onSaveDraftSale && currentDraftId) {
+        if (completedTxIdsRef.current.has(currentDraftId)) {
+          return;
+        }
+
         // Calculate Totals for Draft
         const subtotal = cart.reduce((acc, i) => acc + (i.price * i.qty), 0);
         const lineSavings = cart.reduce((acc, i) => acc + (i.discountType === 'PCT' ? (i.price * i.qty * i.discount / 100) : i.discount), 0);
@@ -431,7 +605,7 @@ const POS: React.FC<POSProps> = ({
           discount: lineSavings + globalDiscountAmt,
           paymentMethod,
           accountId: (paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') ? accountId : 'cash',
-          customerId: posSession.customerId,
+          customerId: (posSession.selectedPOSCustomerId && posSession.selectedPOSCustomerId !== 'WALKING') ? posSession.selectedPOSCustomerId : undefined,
           items: cart.map(i => {
             const itemGross = i.qty * i.price;
             const itemDiscount = i.discountType === 'PCT' ? (itemGross * i.discount) / 100 : i.discount;
@@ -444,18 +618,20 @@ const POS: React.FC<POSProps> = ({
           })
         };
 
+        if (completedTxIdsRef.current.has(currentDraftId)) return;
         await onSaveDraftSale(draftPayload);
         // No need to update currentDraftId since we're using the same one
       }
-    }, 1500); // 1.5s debounce
+    }, 8000); // 8s debounce to conserve Firestore quota
 
     return () => clearTimeout(timer);
-  }, [cart, discount, discountPercent, paymentMethod, accountId, posSession.customerId, currentDraftId, activeTerminal, onSaveDraftSale, globalDiscountType]);
+  }, [cart, discount, discountPercent, paymentMethod, accountId, posSession.selectedPOSCustomerId, currentDraftId, activeTerminal, onSaveDraftSale, globalDiscountType]);
 
   const completeTransaction = (customerId?: string) => {
     setIsProcessing(true);
     // MUST use the existing Draft ID to promote DRAFT → COMPLETED status
     const txId = currentDraftId || `TX-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+    completedTxIdsRef.current.add(txId);
 
     const effectivePaidAmount = isAdvance ? advanceAmount : (paymentMethod === 'CREDIT' ? 0 : totals.finalTotal);
     const effectiveBalanceDue = isAdvance ? (totals.finalTotal - (advanceAmount || 0)) : (paymentMethod === 'CREDIT' ? totals.finalTotal : 0);
@@ -463,7 +639,8 @@ const POS: React.FC<POSProps> = ({
     const txCostBasis = cart.reduce((acc, item) => acc + (item.product.cost || 0) * item.qty, 0);
     const txPayload = {
       id: txId,
-      type: 'SALE',
+      type: 'SALE' as const,
+      status: 'COMPLETED' as const,
       branchId: activeTerminal, // Enforce selected terminal
       amount: totals.finalTotal,
       paidAmount: effectivePaidAmount,
@@ -477,6 +654,8 @@ const POS: React.FC<POSProps> = ({
       chequeNumber: paymentMethod === 'CHEQUE' ? chequeNumber : undefined,
       chequeDate: paymentMethod === 'CHEQUE' ? chequeDate : undefined,
       costBasis: txCostBasis,
+      cashReceived: paymentMethod === 'CASH' ? (parseFloat(cashReceived) || totals.finalTotal) : undefined,
+      changeGiven: paymentMethod === 'CASH' ? changeDue : undefined,
       items: cart.map(i => {
         const itemGross = i.qty * i.price;
         const itemDiscount = i.discountType === 'PCT' ? (itemGross * i.discount) / 100 : i.discount;
@@ -504,7 +683,10 @@ const POS: React.FC<POSProps> = ({
       chequeNumber: '',
       chequeDate: getTodayLocal(),
       isAdvance: false,
-      advanceAmount: 0
+      advanceAmount: 0,
+      selectedPOSCustomerId: 'WALKING',
+      transactionId: undefined,
+      transactionDate: undefined
     });
     setCurrentDraftId(null); // Clear draft ID
     setShowCustomerModal(false);
@@ -587,8 +769,8 @@ const POS: React.FC<POSProps> = ({
             .receipt-content { padding: 4px; box-sizing: border-box; width: 72mm; }
             .center { text-align: center; }
             .hr { border-top: 1px dashed #000; margin: 4px 0; }
-            .biz-name { font-size: 13px; font-weight: 800; text-transform: uppercase; margin: 1px 0; }
-            .biz-sub { font-size: 8px; font-weight: 700; text-transform: uppercase; }
+            .biz-name { font-size: 17px; font-weight: 800; text-transform: uppercase; margin: 1px 0; }
+            .biz-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; }
             .meta { font-size: 8px; margin: 4px 0; font-weight: 700; }
             table { width: 100%; border-collapse: collapse; table-layout: fixed; }
             th { border-bottom: 0.5px solid #000; padding-bottom: 2px; }
@@ -602,7 +784,7 @@ const POS: React.FC<POSProps> = ({
             <div class="center">
               ${logoHtml}
               <div class="biz-name">${userProfile.companyName || userProfile.name}</div>
-              ${userProfile.companyAddress ? `<div class="biz-sub" style="margin-bottom: 2px; font-weight: 500;">${userProfile.companyAddress}</div>` : ''}
+              ${userProfile.companyAddress ? `<div class="biz-sub" style="margin-bottom: 2px;">${userProfile.companyAddress}</div>` : ''}
               <div class="biz-sub">${userProfile.branch}</div>
               ${userProfile.phone ? `<div class="biz-sub">PH: ${userProfile.phone}</div>` : ''}
             </div>
@@ -641,6 +823,16 @@ const POS: React.FC<POSProps> = ({
               <span>NET TOTAL:</span>
               <span>${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
+            ${tx.paymentMethod === 'CASH' ? `
+            <div class="summary-row" style="margin-top: 4px;">
+              <span>CASH:</span>
+              <span>${Number(tx.cashReceived !== undefined ? tx.cashReceived : tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div class="summary-row">
+              <span>BALANCE:</span>
+              <span>${Number(tx.changeGiven !== undefined ? tx.changeGiven : 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            ` : ''}
             ${(tx.balanceDue || 0) > 0 ? `
             <div class="summary-row" style="margin-top: 5px;">
               <span>AMOUNT PAID:</span>
@@ -658,7 +850,7 @@ const POS: React.FC<POSProps> = ({
                 * Exchanges are accepted on the same day only. No refunds will be provided.
             </div>
             <div class="footer">
-                THANK YOU - VISIT AGAIN PRASAMA ERP SOLUTIONS
+                ~~~Thank You~~~
             </div>
           </div>
         </body>
@@ -717,6 +909,14 @@ const POS: React.FC<POSProps> = ({
     const timeStr = new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const grossTotalValue = Number(tx.amount) + Number(tx.discount);
 
+    let paymentDetailsStr = '';
+    if (tx.paymentMethod === 'CASH') {
+      const cashAmtVal = tx.cashReceived !== undefined ? tx.cashReceived : tx.amount;
+      const changeAmtVal = tx.changeGiven !== undefined ? tx.changeGiven : 0;
+      paymentDetailsStr = `\nCASH:${padR(Number(cashAmtVal).toFixed(2), width - 5)}` +
+                          `\nBALANCE:${padR(Number(changeAmtVal).toFixed(2), width - 8)}`;
+    }
+
     // Build the Monospace Receipt
     const whatsappMessage = `\`\`\`
 ${center(bizName.toUpperCase(), width)}
@@ -732,7 +932,7 @@ ${itemsStr.trimEnd()}
 ${dashes}
 SUBTOTAL:${padR(grossTotalValue.toFixed(2), width - 9)}
 ${dashes}
-NET TOTAL:${padR(Number(tx.amount).toFixed(2), width - 10)}
+NET TOTAL:${padR(Number(tx.amount).toFixed(2), width - 10)}${paymentDetailsStr}
 ${dashes}
 PAID BY: ${tx.paymentMethod.toUpperCase()}
 
@@ -740,7 +940,7 @@ PAID BY: ${tx.paymentMethod.toUpperCase()}
 * Payments made for printouts or photocopies are non-refundable.
 * Exchanges are accepted on the same day only. No refunds will be provided.
 ${dashes}
-${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
+${center('~~~Thank You~~~', width)}\`\`\``;
 
     const smsMessage = `Hello ${customer?.name || 'Customer'},\n\nThank you for shopping at ${bizName}!\n\nInvoice: ${tx.id}\nDate: ${formatDate(tx.date)}\nTotal: Rs. ${Number(tx.amount).toLocaleString()}\n\nVisit us again!`;
 
@@ -939,30 +1139,23 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
         <div className="flex-1 flex flex-col gap-3 min-h-0">
           {/* QUICK RELOAD ACTION BAR */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 animate-in slide-in-from-top-4 shrink-0">
-            {[
-              { id: 'PHOTOCOPY D/S', type: 'product', color: 'bg-slate-800 text-white border-slate-800', hover: 'hover:bg-slate-700', icon: '📄', label: 'Quick Add' },
-              { id: 'MOBITEL', type: 'reload', color: 'bg-[#0056b3] text-white border-[#0056b3]', hover: 'hover:bg-[#004494]', icon: '📶', label: 'Hot Reload' },
-              { id: 'AIRTEL', type: 'reload', color: 'bg-[#e53935] text-white border-[#e53935]', hover: 'hover:bg-[#c62828]', icon: '📶', label: 'Hot Reload' },
-              { id: 'HUTCH', type: 'reload', color: 'bg-[#ff9800] text-white border-[#ff9800]', hover: 'hover:bg-[#f57c00]', icon: '📶', label: 'Hot Reload' }
-            ].map(p => {
-              // For products, find exact name. For reloads, find 'RELOAD [PROVIDER]'
+            {quickAddItems.map(p => {
               const isProduct = p.type === 'product';
-              const targetName = isProduct ? p.id : `RELOAD ${p.id}`;
-              const masterStock = products.find(prod => prod.name === targetName);
+              const masterStock = products.find(prod => prod.id === p.productId || prod.name === p.fullName);
               const balance = masterStock ? getAvailableStock(masterStock) : 0;
 
               return (
                 <button
-                  key={p.id}
+                  key={p.productId}
                   onClick={() => {
                     if (isProduct) {
                       if (masterStock) {
                         addToCart(masterStock);
                       } else {
-                        alert(`Product ${p.id} not found in inventory.`);
+                        alert(`Product ${p.displayName} not found in inventory.`);
                       }
                     } else {
-                      handleQuickReload(p.id);
+                      handleQuickReload(p.provider);
                     }
                   }}
                   className={`${p.color} ${p.hover} border p-2 rounded-lg shadow-sm transition-all group text-left relative overflow-hidden`}
@@ -972,17 +1165,17 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                     <div className="flex justify-between items-start mb-1">
                       <p className="text-[8px] font-black uppercase tracking-widest opacity-80">{p.label}</p>
                       {!isProduct && <span className="bg-white/20 px-1 py-0.5 rounded text-[7px] font-black backdrop-blur-sm">4%</span>}
-                    </div >
-                    <p className="text-sm font-black uppercase tracking-tight mb-1.5">{p.id}</p>
+                    </div>
+                    <p className="text-sm font-black uppercase tracking-tight mb-1.5 truncate pr-6">{p.displayName}</p>
                     <div className="bg-black/20 rounded p-1.5 backdrop-blur-sm border border-white/10">
                       <p className="text-[7px] font-black uppercase tracking-widest opacity-70 mb-0.5 leading-none">{isProduct ? 'Stock' : 'Bal.'}</p>
                       <p className="text-[10px] font-black font-mono leading-none">{isProduct ? balance : `Rs. ${balance.toLocaleString()}`}</p>
                     </div>
-                  </div >
-                </button >
+                  </div>
+                </button>
               );
             })}
-          </div >
+          </div>
 
           <div className="flex-1 overflow-x-auto bg-white rounded-2xl border border-slate-200 shadow-sm">
             <table className="w-full text-left text-sm border-collapse table-fixed">
@@ -997,25 +1190,33 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
               <tbody className="divide-y divide-slate-100">
                 {filteredProducts.map(p => {
                   const availableStock = getAvailableStock(p);
+                  const isOut = availableStock <= 0;
                   const isLowStock = availableStock <= (p.lowStockThreshold || 0);
                   return (
-                    <tr key={p.id} className="hover:bg-slate-50 transition-all group">
+                    <tr key={p.id} className={`transition-all group ${isOut ? 'bg-rose-50/50 hover:bg-rose-50' : 'hover:bg-slate-50'}`}>
                       <td className="px-3 py-1 overflow-hidden leading-none">
-                        <div className="flex flex-col gap-0.5 overflow-hidden max-w-full">
-                          <div className="flex items-center gap-1.5 overflow-hidden">
-                            <p className="font-black text-slate-800 text-[10px] uppercase truncate shrink leading-tight">{p.name}</p>
-                            <span className="text-slate-200 shrink-0 text-[8px]"> • </span>
-                            <p className="text-[7px] font-mono font-bold text-indigo-400 uppercase truncate opacity-70 shrink-0 leading-tight">{p.sku}</p>
+                        <div className="flex items-center gap-2 overflow-hidden max-w-full">
+                          {p.imageUrl ? (
+                            <img src={p.imageUrl} alt={p.name} className="w-7 h-7 object-cover rounded-lg border border-slate-200 shrink-0 bg-white shadow-sm" />
+                          ) : null}
+                          <div className="flex flex-col gap-0.5 overflow-hidden max-w-full">
+                            <div className="flex items-center gap-1.5 overflow-hidden">
+                              <p className={`font-black text-[10px] uppercase truncate shrink leading-tight ${isOut ? 'text-rose-600 font-extrabold' : 'text-slate-800'}`}>{p.name}</p>
+                              <span className="text-slate-200 shrink-0 text-[8px]"> • </span>
+                              <p className={`text-[7px] font-mono font-bold uppercase truncate shrink-0 leading-tight ${isOut ? 'text-rose-400' : 'text-indigo-400 opacity-70'}`}>{p.sku}</p>
+                            </div>
+                            {p.internalNotes && <p className="text-[6px] font-black text-rose-400 uppercase tracking-widest truncate">{p.internalNotes}</p>}
                           </div>
-                          {p.internalNotes && <p className="text-[6px] font-black text-rose-400 uppercase tracking-widest truncate">{p.internalNotes}</p>}
                         </div>
                       </td>
                       <td className="px-2 py-0.5 text-right whitespace-nowrap">
-                        <span className="font-bold text-slate-800 text-[10px] font-mono leading-none">{Number(p.price).toLocaleString()}</span>
+                        <span className={`font-bold text-[10px] font-mono leading-none ${isOut ? 'text-rose-600' : 'text-slate-800'}`}>{Number(p.price).toLocaleString()}</span>
                       </td>
                       <td className={`px-1.5 py-0 text-center leading-none`}>
-                        <div className={`inline-flex items-center gap-1 px-1 py-0.5 rounded border ${isLowStock
-                          ? 'bg-rose-50 border-rose-100 text-rose-500'
+                        <div className={`inline-flex items-center gap-1 px-1 py-0.5 rounded border ${isOut
+                          ? 'bg-rose-100 border-rose-200 text-rose-600 font-black'
+                          : isLowStock
+                          ? 'bg-amber-50 border-amber-100 text-amber-600 font-bold'
                           : 'bg-emerald-50 border-emerald-100 text-emerald-500'
                           }`}>
                           <span className="text-[9px] font-black font-mono leading-none">{availableStock}</span>
@@ -1026,7 +1227,11 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                         <button
                           onClick={(e) => { e.stopPropagation(); addToCart(p); }}
                           disabled={availableStock <= 0}
-                          className="w-6 h-6 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-sm hover:bg-black hover:scale-105 active:scale-95 transition-all shadow-md disabled:bg-slate-100 disabled:text-slate-200"
+                          title={isOut ? 'Out of Stock' : 'Add to Cart'}
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-sm transition-all shadow-md ${isOut
+                            ? 'bg-rose-100 text-rose-400 border border-rose-200 cursor-not-allowed opacity-50'
+                            : 'bg-slate-900 text-white hover:bg-black hover:scale-105 active:scale-95'
+                            }`}
                         >
                           +
                         </button>
@@ -1289,16 +1494,44 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                 <span className="text-xl font-black text-slate-950 font-mono leading-none tracking-tighter">Rs. {totals.finalTotal.toLocaleString()}</span>
               </div>
 
+              {/* FAST 1-CLICK CASH BUTTON */}
+              {paymentMethod === 'CASH' && !isAdvance && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCashReceived(totals.finalTotal.toString());
+                    completeTransaction();
+                  }}
+                  disabled={cart.length === 0 || isProcessing}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-black uppercase text-[11px] shadow-lg active:scale-[0.97] disabled:bg-slate-200 transition-all tracking-[0.15em] flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>⚡</span>
+                  <span>PAY EXACT CASH (Rs. {totals.finalTotal.toLocaleString()})</span>
+                </button>
+              )}
+
               <button
                 onClick={() => {
-                  if (paymentMethod === 'CREDIT' || isAdvance) setShowCustomerModal(true);
-                  else if (paymentMethod === 'CASH') setShowCashModal(true);
-                  else completeTransaction();
+                  const hasCustomerSelected = posSession.selectedPOSCustomerId && posSession.selectedPOSCustomerId !== 'WALKING';
+                  if ((paymentMethod === 'CREDIT' || isAdvance) && !hasCustomerSelected) {
+                    setShowCustomerModal(true);
+                  } else if (paymentMethod === 'CASH') {
+                    setCashReceived((isAdvance ? (advanceAmount || 0) : totals.finalTotal).toString());
+                    setShowCashModal(true);
+                  } else {
+                    completeTransaction();
+                  }
                 }}
                 disabled={cart.length === 0 || isProcessing || (isAdvance && ((advanceAmount || 0) <= 0 || (advanceAmount || 0) >= totals.finalTotal))}
-                className="w-full bg-slate-950 text-white py-3.5 rounded-2xl font-black uppercase text-[10px] shadow-2xl hover:bg-black active:scale-[0.97] disabled:bg-slate-200 transition-all tracking-[0.2em] relative overflow-hidden group"
+                className="w-full bg-slate-950 text-white py-3.5 rounded-2xl font-black uppercase text-[10px] shadow-2xl hover:bg-black active:scale-[0.97] disabled:bg-slate-200 transition-all tracking-[0.2em] relative overflow-hidden group cursor-pointer"
               >
-                <span className="relative z-10">{isAdvance ? 'Commit Partial Authorization' : 'Authorize Full Settlement'}</span>
+                <span className="relative z-10">
+                  {isAdvance
+                    ? 'Commit Partial Authorization'
+                    : paymentMethod === 'CASH'
+                    ? 'Cash Tender / Enter Change'
+                    : `Complete Sale (${paymentMethod})`}
+                </span>
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
               </button>
             </div>
@@ -1361,8 +1594,36 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                 <span className="text-2xl font-black text-slate-900 font-mono">Rs. {(isAdvance ? (advanceAmount || 0) : totals.finalTotal).toLocaleString()}</span>
               </div>
               <div className="space-y-4">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Amount Given</label>
-                <input autoFocus type="number" className="w-full px-8 py-5 rounded-3xl border-2 border-slate-100 text-4xl font-black font-mono text-center text-indigo-600 outline-none" placeholder="0.00" value={cashReceived} onChange={e => setCashReceived(e.target.value)} />
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Amount Given</label>
+                <input
+                  autoFocus
+                  type="number"
+                  onFocus={e => e.target.select()}
+                  className="w-full px-8 py-5 rounded-3xl border-2 border-slate-100 text-4xl font-black font-mono text-center text-indigo-600 outline-none focus:border-indigo-500 shadow-inner"
+                  placeholder="0.00"
+                  value={cashReceived}
+                  onChange={e => setCashReceived(e.target.value)}
+                />
+                {/* QUICK DENOMINATIONS */}
+                <div className="flex flex-wrap gap-2 pt-1 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setCashReceived((isAdvance ? (advanceAmount || 0) : totals.finalTotal).toString())}
+                    className="px-4 py-2 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black text-[10px] uppercase border border-indigo-200 transition-all active:scale-95 shadow-sm"
+                  >
+                    Exact (Rs. {(isAdvance ? (advanceAmount || 0) : totals.finalTotal).toLocaleString()})
+                  </button>
+                  {[500, 1000, 2000, 5000].map(amt => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setCashReceived(amt.toString())}
+                      className="px-4 py-2 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-[10px] font-mono border border-slate-200 transition-all active:scale-95 shadow-sm"
+                    >
+                      Rs. {amt.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
               </div>
               {parseFloat(cashReceived) > (isAdvance ? (advanceAmount || 0) : totals.finalTotal) && (
                 <div className="p-6 rounded-3xl bg-indigo-50 border border-indigo-100 flex justify-between items-center animate-in fade-in slide-in-from-top-1">
@@ -1374,14 +1635,14 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                 <button
                   type="button"
                   onClick={() => { setShowCashModal(false); setCashReceived(''); }}
-                  className="flex-1 bg-slate-100 text-slate-900 font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-xs hover:bg-slate-200 transition-all"
+                  className="flex-1 bg-slate-100 text-slate-900 font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-xs hover:bg-slate-200 transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isProcessing || (parseFloat(cashReceived) || 0) < (isAdvance ? (advanceAmount || 0) : totals.finalTotal)}
-                  className="flex-[2] bg-slate-900 text-white font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-xs shadow-2xl hover:bg-black transition-all"
+                  className="flex-[2] bg-emerald-600 hover:bg-emerald-700 text-white font-black py-5 rounded-[1.5rem] uppercase tracking-widest text-xs shadow-2xl transition-all cursor-pointer active:scale-95 disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   Finalize Sale
                 </button>
@@ -1421,12 +1682,14 @@ ${center('THANK YOU - VISIT AGAIN', width)}\`\`\``;
                   <div className="max-h-64 overflow-y-auto space-y-2">
                     {filteredCustomers.map(c => (
                       <button key={c.id} onClick={() => {
+                        setPosSession(prev => ({ ...prev, selectedPOSCustomerId: c.id }));
+                        setShowCustomerModal(false);
                         // In Debt Auto-Gen (advance) mode, complete transaction directly
                         // Otherwise, show cash modal for CASH payment or complete for other methods
                         if (isAdvance) {
                           completeTransaction(c.id);
                         } else if (paymentMethod === 'CASH') {
-                          setShowCustomerModal(false);
+                          setCashReceived((isAdvance ? (advanceAmount || 0) : totals.finalTotal).toString());
                           setShowCashModal(true);
                         } else {
                           completeTransaction(c.id);

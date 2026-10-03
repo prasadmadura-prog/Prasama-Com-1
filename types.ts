@@ -12,6 +12,11 @@ export interface Product {
   lowStockThreshold: number;
   userId?: string;
   internalNotes?: string;
+  extraDetails?: string;
+  sinhalaName?: string;
+  c4FreeText?: string;
+  c4FreeTextSinhala?: string;
+  imageUrl?: string;
 }
 
 export interface Category {
@@ -51,6 +56,14 @@ export interface PurchaseOrderItem {
   quantity: number;
   freeQuantity?: number; // Support for free issue items
   cost: number;
+  discount?: number; // Line item discount
+  discountPercent?: number; // Line item discount percentage
+}
+
+export interface ChequeItem {
+  chequeNumber: string;
+  chequeDate: string;
+  amount?: number;
 }
 
 export interface PurchaseOrder {
@@ -65,6 +78,11 @@ export interface PurchaseOrder {
   accountId?: string;
   chequeNumber?: string;
   chequeDate?: string;
+  chequeNumber2?: string;
+  chequeDate2?: string;
+  chequeAmount1?: number;
+  chequeAmount2?: number;
+  cheques?: ChequeItem[];
   userId?: string;
   branchId?: string;
   notes?: string;
@@ -95,7 +113,7 @@ export interface Quotation {
 export interface Transaction {
   id: string;
   date: string;
-  type: 'SALE' | 'PURCHASE' | 'EXPENSE' | 'CREDIT_PAYMENT' | 'TRANSFER' | 'SALE_HISTORY_IMPORT' | 'LOAN_GIVEN';
+  type: 'SALE' | 'PURCHASE' | 'EXPENSE' | 'CREDIT_PAYMENT' | 'TRANSFER' | 'SALE_HISTORY_IMPORT' | 'LOAN_GIVEN' | 'JOURNAL';
   amount: number;
   paidAmount?: number;
   balanceDue?: number;
@@ -109,6 +127,11 @@ export interface Transaction {
   vendorId?: string;
   chequeNumber?: string;
   chequeDate?: string;
+  chequeNumber2?: string;
+  chequeDate2?: string;
+  chequeAmount1?: number;
+  chequeAmount2?: number;
+  cheques?: ChequeItem[];
   userId?: string;
   branchId?: string;
   parentTxId?: string;
@@ -116,6 +139,10 @@ export interface Transaction {
   category?: string;
   mainCategory?: string;
   status?: 'COMPLETED' | 'DRAFT' | 'VOID';
+  attachment?: string;
+  attachmentName?: string;
+  cashReceived?: number;
+  changeGiven?: number;
 }
 
 export interface DaySession {
@@ -178,7 +205,7 @@ export interface FixedAsset {
   userId?: string;
 }
 
-export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD' | 'USER_CONTROL' | 'FIXED_ASSETS';
+export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD' | 'USER_CONTROL' | 'FIXED_ASSETS' | 'ACCOUNTING_LIABILITIES' | 'REPORTS';
 
 export interface POSSession {
   cart: {

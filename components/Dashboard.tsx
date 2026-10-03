@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Transaction, Product, BankAccount, View, PurchaseOrder, DaySession, Customer, Vendor, Category, UserProfile } from '../types';
+import { Transaction, Product, BankAccount, View, PurchaseOrder, DaySession, Customer, Vendor, Category, UserProfile, FixedAsset } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface DashboardProps {
@@ -121,10 +121,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     const effectiveRevenue = revenue + (reloadSales * 0.04);
     const margin = effectiveRevenue > 0 ? (profit / effectiveRevenue) * 100 : 0;
 
-    // FIX: Sum opening balances for ALL sessions if filter is ALL
-    const openingFloat = daySessions
-      .filter(s => s.date === todayStr && (branchFilter === 'ALL' || normalizeBranch(s.branchId) === normalizeBranch(branchFilter)))
-      .reduce((acc, s) => acc + Number(s.openingBalance || 0), 0);
+    // FIX: Treat daily opening balance as a zero value for calculations
+    const openingFloat = 0;
 
     // CASH BASIS: Only actual cash that entered the drawer today.
     const cashIn = todayTxs.reduce((acc, t) => {
@@ -398,7 +396,16 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const getLocalDateStringOffset = (offsetDays = 0) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getLocalDateStringOffset(0);
 
     // Filter out past events (keep OUTSTANDING and dates >= today)
     const validEvents = events.filter(e => e.date === 'OUTSTANDING' || e.date >= todayStr);
@@ -421,15 +428,22 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [showChequeModal, setShowChequeModal] = React.useState(false);
 
   React.useEffect(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1); // Tomorrow
-    const tomorrowStr = d.toISOString().split('T')[0];
+    const getLocalDateStringOffset = (offsetDays = 0) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
 
-    // Find outgoing cheques due tomorrow
+    const todayStr = getLocalDateStringOffset(0);
+    const tomorrowStr = getLocalDateStringOffset(1);
+
+    // Find all cheques (INCOMING & OUTGOING) due today or tomorrow
     const alerts = futureFinancials.list.filter(e =>
-      e.date === tomorrowStr &&
-      e.method === 'CHEQUE' &&
-      e.type === 'OUTGOING'
+      (e.date === tomorrowStr || e.date === todayStr) &&
+      e.method === 'CHEQUE'
     );
 
     if (alerts.length > 0) {
@@ -770,45 +784,55 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div>
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl animate-bounce">🔔</div>
-                    <h2 className="text-xl font-black uppercase text-slate-900 tracking-tighter">Cheque Clearance Alert</h2>
+                    <h2 className="text-xl font-black uppercase text-slate-900 tracking-tighter">Cheque Clearance Notification</h2>
                   </div>
-                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest pl-1">Action Required for Tomorrow's Clearing</p>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest pl-1">Bank Maturing Cheque Alerts ({chequeAlerts.length})</p>
                 </div>
                 <button
                   onClick={() => setShowChequeModal(false)}
-                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+                  className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors font-bold"
                 >
                   ✕
                 </button>
               </div>
 
-              <div className="bg-indigo-50/50 rounded-2xl p-6 border border-indigo-100 mb-6">
-                <p className="text-sm font-bold text-indigo-900 leading-relaxed">
-                  The following cheques are scheduled to be presented to the bank <span className="underline decoration-indigo-400 decoration-2 underline-offset-2">TOMORROW</span>.
-                  Please ensure sufficient funds are available in the respective accounts.
+              <div className="bg-indigo-50/70 rounded-2xl p-6 border border-indigo-100 mb-6">
+                <p className="text-sm font-bold text-indigo-950 leading-relaxed">
+                  The following cheques are scheduled to hit the bank <span className="underline decoration-indigo-500 decoration-2 underline-offset-2 uppercase font-black">TODAY / TOMORROW</span>.
+                  Please verify bank balances and account clearance status.
                 </p>
               </div>
 
-              <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-3 mb-8 pr-2">
+              <div className="max-h-[320px] overflow-y-auto custom-scrollbar space-y-3 mb-8 pr-2">
                 {chequeAlerts.map((alert, idx) => {
-                  // Calendar Date Logic
-                  const evtDate = alert.date.replace(/-/g, '');
+                  const evtDate = (alert.date || '').replace(/-/g, '');
                   const alertDateStr = typeof alert.date === 'string' ? alert.date : new Date().toISOString();
                   const nextDay = new Date(new Date(alertDateStr).getTime() + 86400000).toISOString().split('T')[0].replace(/-/g, '');
 
-                  // Email Body Logic
+                  const isIncoming = alert.type === 'INCOMING';
                   const recipientEmail = "prasadmadura@gmail.com";
-                  const emailSubject = `URGENT: Cheque Clearance Alert - ${alert.entity}`;
-                  const emailBodyText = `Cheque Clearance Notification\r\n\r\nVendor: ${alert.entity}\r\nAmount: Rs. ${Number(alert.amount).toLocaleString()}\r\nCheque Date: ${alert.date}\r\n\r\nThis cheque is scheduled to hit the bank tomorrow.\r\n\r\nPlease ensure sufficient funds are available in the attached account.`;
+                  const emailSubject = `URGENT: Cheque Alert (${isIncoming ? 'INCOMING DEPOSIT' : 'OUTGOING CLEARANCE'}) - ${alert.entity}`;
+                  const emailBodyText = `Cheque Clearance Notification\r\n\r\nType: ${isIncoming ? 'Incoming Deposit' : 'Outgoing Payment'}\r\nEntity: ${alert.entity}\r\nAmount: Rs. ${Number(alert.amount).toLocaleString()}\r\nCheque Date: ${alert.date}\r\n\r\nThis cheque is scheduled for bank clearance.\r\n\r\nPlease ensure funds/deposit validation in the bank.`;
 
                   return (
                     <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-colors gap-4">
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-lg shadow-inner">🏦</div>
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-inner ${isIncoming ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                          {isIncoming ? '📥' : '📤'}
+                        </div>
                         <div>
-                          <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{alert.entity}</h4>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                            Amount: <span className="text-slate-700 font-mono">Rs. {Number(alert.amount).toLocaleString()}</span>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">{alert.entity}</h4>
+                            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${isIncoming ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                              {isIncoming ? 'Incoming' : 'Outgoing'}
+                            </span>
+                            <span className="text-[8px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                              {alert.date}
+                            </span>
+                          </div>
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
+                            Amount: <span className="text-slate-900 font-mono font-black">Rs. {Number(alert.amount).toLocaleString()}</span>
+                            {alert.desc && <span className="ml-2 text-slate-400">({alert.desc})</span>}
                           </p>
                         </div>
                       </div>
@@ -823,7 +847,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           <span className="group-hover:scale-110 transition-transform">📧</span> Email Me
                         </a>
                         <a
-                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('CHEQUE DUE: ' + alert.entity + ' - Rs. ' + Number(alert.amount).toLocaleString())}&dates=${evtDate}/${nextDay}&details=${encodeURIComponent('Vendor: ' + alert.entity + '\nAmount: Rs. ' + Number(alert.amount).toLocaleString() + '\n\nReminder for: prasadmadura@gmail.com')}&add=prasadmadura@gmail.com`}
+                          href={`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('CHEQUE DUE: ' + alert.entity + ' - Rs. ' + Number(alert.amount).toLocaleString())}&dates=${evtDate}/${nextDay}&details=${encodeURIComponent('Entity: ' + alert.entity + '\nAmount: Rs. ' + Number(alert.amount).toLocaleString() + '\n\nReminder for: prasadmadura@gmail.com')}&add=prasadmadura@gmail.com`}
                           target="_blank"
                           rel="noreferrer"
                           className="flex-1 sm:flex-none px-4 py-2 bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 group"
@@ -836,7 +860,10 @@ const Dashboard: React.FC<DashboardProps> = ({
                 })}
               </div>
 
-              <div className="flex justify-end pt-4 border-t border-slate-100">
+              <div className="flex justify-between items-center pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  Total Alert Amount: <span className="font-mono text-slate-900 font-black">Rs. {chequeAlerts.reduce((sum, a) => sum + Number(a.amount || 0), 0).toLocaleString()}</span>
+                </p>
                 <button
                   onClick={() => setShowChequeModal(false)}
                   className="px-8 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20"
