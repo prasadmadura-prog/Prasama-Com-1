@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import JsBarcode from 'jsbarcode';
-import { Product, Category, Vendor, UserProfile } from '../types';
+import { Product, ProductVariant, ProductBatch, Category, Vendor, UserProfile } from '../types';
+import { recalculateProductSummary, createNewBatch } from '../utils/batchInventoryUtils';
 
 interface InventoryProps {
   products: Product[];
@@ -65,6 +66,12 @@ const Inventory: React.FC<InventoryProps> = ({
   const [branchStocksState, setBranchStocksState] = useState<Record<string, number>>({});
   const [selectedStoreForStock, setSelectedStoreForStock] = useState<string>('CASHIER 1');
 
+  // Size Variations & Batch History State
+  const [hasSizesState, setHasSizesState] = useState<boolean>(false);
+  const [variantsState, setVariantsState] = useState<ProductVariant[]>([]);
+  const [batchesState, setBatchesState] = useState<ProductBatch[]>([]);
+  const [showBatchHistory, setShowBatchHistory] = useState<boolean>(false);
+  const [customSizeInput, setCustomSizeInput] = useState<string>('');
 
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -162,6 +169,10 @@ const Inventory: React.FC<InventoryProps> = ({
       };
       setBranchStocksState(initialStocks);
       setSelectedStoreForStock('CASHIER 1');
+      setHasSizesState(Boolean(editingProduct.hasSizes && Array.isArray(editingProduct.variants) && editingProduct.variants.length > 0));
+      setVariantsState(editingProduct.variants ? JSON.parse(JSON.stringify(editingProduct.variants)) : []);
+      setBatchesState(editingProduct.batches ? JSON.parse(JSON.stringify(editingProduct.batches)) : []);
+      setShowBatchHistory(false);
     } else {
       setCostValue(0);
       setPriceValue(0);
@@ -173,6 +184,10 @@ const Inventory: React.FC<InventoryProps> = ({
         'CASHIER 4': 0
       });
       setSelectedStoreForStock('CASHIER 1');
+      setHasSizesState(false);
+      setVariantsState([]);
+      setBatchesState([]);
+      setShowBatchHistory(false);
       if ((categories || []).length > 0 && !selectedCategoryId) {
         setSelectedCategoryId(categories[0]?.id || '');
       }
@@ -181,6 +196,64 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [editingProduct, categories, isModalOpen]);
+
+  const handleAddPresetSizes = (presetSizes: string[]) => {
+    const existingSizes = new Set(variantsState.map(v => (v.size || '').toUpperCase()));
+    const newVariants: ProductVariant[] = [...variantsState];
+
+    presetSizes.forEach(size => {
+      const upperSize = size.toUpperCase();
+      if (!existingSizes.has(upperSize)) {
+        newVariants.push({
+          id: `var-${Date.now()}-${upperSize.toLowerCase()}-${Math.random().toString(36).substr(2, 4)}`,
+          size: upperSize,
+          sku: `${skuValue.trim() || 'ITEM'}-${upperSize}`,
+          price: priceValue || 0,
+          cost: costValue || 0,
+          stock: 0,
+          branchStocks: { 'CASHIER 1': 0, 'CASHIER 2': 0, 'CASHIER 3': 0, 'CASHIER 4': 0 },
+          batches: []
+        });
+      }
+    });
+
+    setVariantsState(newVariants);
+  };
+
+  const handleAddCustomSize = () => {
+    const trimmed = customSizeInput.trim().toUpperCase();
+    if (!trimmed) return;
+    const existing = variantsState.find(v => (v.size || '').toUpperCase() === trimmed);
+    if (existing) {
+      alert(`Size ${trimmed} already exists!`);
+      return;
+    }
+    const newVariant: ProductVariant = {
+      id: `var-${Date.now()}-${trimmed.toLowerCase()}-${Math.random().toString(36).substr(2, 4)}`,
+      size: trimmed,
+      sku: `${skuValue.trim() || 'ITEM'}-${trimmed}`,
+      price: priceValue || 0,
+      cost: costValue || 0,
+      stock: 0,
+      branchStocks: { 'CASHIER 1': 0, 'CASHIER 2': 0, 'CASHIER 3': 0, 'CASHIER 4': 0 },
+      batches: []
+    };
+    setVariantsState([...variantsState, newVariant]);
+    setCustomSizeInput('');
+  };
+
+  const handleUpdateVariant = (varId: string, field: keyof ProductVariant, value: any) => {
+    setVariantsState(prev => prev.map(v => {
+      if (v.id === varId) {
+        return { ...v, [field]: value };
+      }
+      return v;
+    }));
+  };
+
+  const handleRemoveVariant = (varId: string) => {
+    setVariantsState(prev => prev.filter(v => v.id !== varId));
+  };
 
   const storeOptions = useMemo(() => {
     const defaults = ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4', 'MAIN STORE'];
@@ -315,7 +388,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
     const totalCalculatedStock = Object.values(bStocks).reduce((a, b) => a + (Number(b) || 0), 0);
 
-    const productData: Product = {
+    let productData: Product = {
       id: editingProduct?.id || `P-${Date.now()}`,
       name: (formData.get('name') as string).toUpperCase(),
       sku: finalSku.toUpperCase(),
@@ -332,7 +405,15 @@ const Inventory: React.FC<InventoryProps> = ({
       c4FreeText: (formData.get('c4FreeText') as string) || '',
       c4FreeTextSinhala: (formData.get('c4FreeTextSinhala') as string) || '',
       imageUrl: imageUrlValue.trim() || undefined,
+      hasSizes: hasSizesState,
+      variants: hasSizesState ? variantsState : undefined,
+      batches: batchesState && batchesState.length > 0 ? batchesState : (editingProduct?.batches || []),
+      costingMethod: 'FIFO'
     };
+
+    if (hasSizesState && variantsState.length > 0) {
+      productData = recalculateProductSummary(productData);
+    }
 
     try {
       await onUpsertProduct(productData);
@@ -575,7 +656,19 @@ const Inventory: React.FC<InventoryProps> = ({
                           </div>
                         )}
                         <div>
-                          <p className="font-black text-slate-900 text-[13px] uppercase mb-1 tracking-tight leading-none">{p.name}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <p className="font-black text-slate-900 text-[13px] uppercase tracking-tight leading-none">{p.name}</p>
+                            {p.hasSizes && p.variants && p.variants.length > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-[8px] uppercase tracking-wider">
+                                👕 {p.variants.length} SIZES ({p.variants.map(v => v.size).join(', ')})
+                              </span>
+                            )}
+                            {p.batches && p.batches.length > 1 && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-black text-[8px] uppercase tracking-wider">
+                                📦 {p.batches.length} BATCHES
+                              </span>
+                            )}
+                          </div>
                           <div className="flex gap-2 items-center">
                             <p className="font-mono text-[10px] font-black text-indigo-500 tracking-tighter opacity-80">{p.sku}</p>
                             {p.internalNotes && <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest pl-2 border-l border-slate-200">Note: {p.internalNotes}</span>}
@@ -587,7 +680,16 @@ const Inventory: React.FC<InventoryProps> = ({
                     <td className="px-10 py-4">
                       <span className="text-[10px] font-black text-slate-400 uppercase bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">{getCategoryName(p.categoryId)}</span>
                     </td>
-                    <td className="px-10 py-4 text-right font-black text-slate-900 font-mono text-[13px]">Rs. {Number(p.price).toLocaleString()}</td>
+                    <td className="px-10 py-4 text-right font-black text-slate-900 font-mono text-[13px]">
+                      {p.hasSizes && p.variants && p.variants.length > 1 ? (
+                        <div>
+                          <p className="leading-tight">Rs. {Math.min(...p.variants.map(v => Number(v.price) || 0)).toLocaleString()} - {Math.max(...p.variants.map(v => Number(v.price) || 0)).toLocaleString()}</p>
+                          <p className="text-[8px] text-slate-400 font-normal uppercase">Size Prices</p>
+                        </div>
+                      ) : (
+                        `Rs. ${Number(p.price).toLocaleString()}`
+                      )}
+                    </td>
                     {selectedBranch === 'ALL CASHIERS' ? (
                       <>
                         <td className="px-4 py-4 text-center">
@@ -869,13 +971,251 @@ const Inventory: React.FC<InventoryProps> = ({
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Unit Cost</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        {hasSizesState ? 'Default / Base Cost' : 'Unit Cost'}
+                      </label>
                       <input type="number" step="0.01" value={costValue} onChange={e => handleCostChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none text-slate-800 bg-white" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-right">Selling Price</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-right">
+                        {hasSizesState ? 'Default / Base Price' : 'Selling Price'}
+                      </label>
                       <input type="number" step="0.01" value={priceValue} onChange={e => handlePriceChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-indigo-200 font-black font-mono text-[14px] text-indigo-700 outline-none text-right bg-white" />
                     </div>
+                  </div>
+
+                  {/* SIZE VARIATIONS ACCORDION / TOGGLE */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">👕</span>
+                        <div>
+                          <h4 className="text-[11px] font-black uppercase text-slate-900 tracking-wide">
+                            Size Variations (S, M, L, XL, etc.)
+                          </h4>
+                          <p className="text-[8px] font-bold text-slate-400 uppercase">
+                            Each size gets its own barcode, stock, purchase cost & selling price
+                          </p>
+                        </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={hasSizesState}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setHasSizesState(checked);
+                            if (checked && variantsState.length === 0) {
+                              handleAddPresetSizes(['S', 'M', 'L', 'XL']);
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+
+                    {hasSizesState && (
+                      <div className="space-y-3 pt-2 border-t border-slate-200/60 animate-in fade-in duration-200">
+                        {/* Quick Preset Buttons */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">Add Presets:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddPresetSizes(['S', 'M', 'L', 'XL', 'XXL'])}
+                            className="px-2.5 py-1 bg-white border border-slate-200 hover:border-indigo-400 rounded-lg text-[9px] font-black uppercase text-slate-700 shadow-sm"
+                          >
+                            + S - XXL
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAddPresetSizes(['XS', 'S', 'M', 'L', 'XL'])}
+                            className="px-2.5 py-1 bg-white border border-slate-200 hover:border-indigo-400 rounded-lg text-[9px] font-black uppercase text-slate-700 shadow-sm"
+                          >
+                            + XS - XL
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAddPresetSizes(['28', '30', '32', '34', '36', '38'])}
+                            className="px-2.5 py-1 bg-white border border-slate-200 hover:border-indigo-400 rounded-lg text-[9px] font-black uppercase text-slate-700 shadow-sm"
+                          >
+                            + 28 - 38 Waist
+                          </button>
+                          
+                          <div className="flex items-center gap-1 ml-auto">
+                            <input
+                              type="text"
+                              value={customSizeInput}
+                              onChange={(e) => setCustomSizeInput(e.target.value.toUpperCase())}
+                              placeholder="Custom Size..."
+                              className="w-24 px-2 py-1 rounded-lg border border-slate-200 text-[10px] font-bold uppercase outline-none bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddCustomSize}
+                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[9px] font-black uppercase shadow-sm"
+                            >
+                              + Add
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Variations Table */}
+                        {variantsState.length > 0 ? (
+                          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-50 text-[8px] font-black uppercase text-slate-400 tracking-wider">
+                                <tr>
+                                  <th className="px-2.5 py-2">Size</th>
+                                  <th className="px-2 py-2">Barcode (SKU)</th>
+                                  <th className="px-2 py-2 text-right">Cost (Rs.)</th>
+                                  <th className="px-2 py-2 text-right">Selling (Rs.)</th>
+                                  <th className="px-2 py-2 text-center">Stock</th>
+                                  <th className="px-2 py-2 text-center"></th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {variantsState.map((v) => (
+                                  <tr key={v.id} className="hover:bg-slate-50/50">
+                                    <td className="px-2.5 py-2">
+                                      <span className="w-7 h-7 rounded-lg bg-slate-900 text-white font-black text-[11px] flex items-center justify-center">
+                                        {v.size}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      <input
+                                        type="text"
+                                        value={v.sku}
+                                        onChange={(e) => handleUpdateVariant(v.id, 'sku', e.target.value.toUpperCase())}
+                                        className="w-full px-2 py-1 rounded border border-slate-200 font-mono text-[10px] font-bold outline-none"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        value={v.cost}
+                                        onChange={(e) => handleUpdateVariant(v.id, 'cost', parseFloat(e.target.value) || 0)}
+                                        className="w-20 px-2 py-1 rounded border border-slate-200 font-mono text-[10px] font-bold text-right outline-none"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2 text-right">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        value={v.price}
+                                        onChange={(e) => handleUpdateVariant(v.id, 'price', parseFloat(e.target.value) || 0)}
+                                        className="w-20 px-2 py-1 rounded border border-indigo-200 font-mono text-[10px] font-bold text-indigo-700 text-right outline-none"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2 text-center">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={v.stock}
+                                        onChange={(e) => {
+                                          const newStock = parseInt(e.target.value) || 0;
+                                          handleUpdateVariant(v.id, 'stock', newStock);
+                                          const bStocks = { ...(v.branchStocks || {}) };
+                                          bStocks['CASHIER 1'] = newStock;
+                                          handleUpdateVariant(v.id, 'branchStocks', bStocks);
+                                        }}
+                                        className="w-14 px-1.5 py-1 rounded border border-slate-200 font-mono text-[10px] font-bold text-center outline-none"
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveVariant(v.id)}
+                                        className="text-rose-500 hover:text-rose-700 font-black text-sm"
+                                        title="Remove size"
+                                      >
+                                        &times;
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="py-4 text-center text-[10px] font-bold text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                            No sizes added yet. Click a preset above or type a custom size.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* BATCHES & COST HISTORY ACCORDION */}
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchHistory(!showBatchHistory)}
+                      className="w-full flex items-center justify-between text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">📦</span>
+                        <div>
+                          <h4 className="text-[11px] font-black uppercase text-slate-900 tracking-wide">
+                            Purchase Batches & Cost History (FIFO)
+                          </h4>
+                          <p className="text-[8px] font-bold text-slate-400 uppercase">
+                            Historical purchase costs are locked per batch and never overwritten
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[9px]">
+                          {batchesState.length} Batches
+                        </span>
+                        <span className="text-xs text-slate-400">{showBatchHistory ? '▲' : '▼'}</span>
+                      </div>
+                    </button>
+
+                    {showBatchHistory && (
+                      <div className="pt-2 border-t border-slate-200/60 space-y-2 animate-in fade-in duration-200">
+                        {batchesState.length > 0 ? (
+                          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                            <table className="w-full text-left text-[10px]">
+                              <thead className="bg-slate-50 text-[8px] font-black uppercase text-slate-400 tracking-wider">
+                                <tr>
+                                  <th className="px-2.5 py-1.5">Batch #</th>
+                                  <th className="px-2.5 py-1.5">Date</th>
+                                  <th className="px-2.5 py-1.5 text-right">Cost Price</th>
+                                  <th className="px-2.5 py-1.5 text-center">Remaining</th>
+                                  <th className="px-2.5 py-1.5">Supplier / PO</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-mono">
+                                {batchesState.map((b) => (
+                                  <tr key={b.id} className="hover:bg-slate-50">
+                                    <td className="px-2.5 py-1.5 font-bold text-slate-800">{b.batchNumber}</td>
+                                    <td className="px-2.5 py-1.5 text-slate-500">{b.date ? b.date.split('T')[0] : 'N/A'}</td>
+                                    <td className="px-2.5 py-1.5 text-right font-black text-indigo-700">Rs. {Number(b.purchaseCost).toLocaleString()}</td>
+                                    <td className="px-2.5 py-1.5 text-center font-bold text-slate-800">
+                                      <span className={b.remainingQuantity > 0 ? 'text-emerald-600' : 'text-slate-400'}>
+                                        {b.remainingQuantity} / {b.initialQuantity}
+                                      </span>
+                                    </td>
+                                    <td className="px-2.5 py-1.5 text-[9px] text-slate-500 font-sans truncate max-w-[120px]">
+                                      {b.supplierName || b.purchaseOrderId || 'Initial Stock'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-white rounded-xl border border-dashed border-slate-200 text-center text-[9px] font-bold text-slate-500">
+                            No purchase batches recorded yet. Batches will be automatically generated as stock is received through purchase orders.
+                          </div>
+                        )}
+                        <p className="text-[8px] text-slate-400 italic font-medium leading-relaxed">
+                          🔒 When new stock arrives at a new price, a new batch is created. Old stock will continue to sell at the historical cost until depleted (FIFO).
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">

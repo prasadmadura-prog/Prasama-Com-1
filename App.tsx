@@ -29,6 +29,7 @@ import UserControl from './components/UserControl';
 import FixedAssets from './components/FixedAssets';
 import AccountingLiabilities from './components/AccountingLiabilities';
 import Reports from './components/Reports';
+import { applyPurchaseToProduct, applySaleDeductionToProduct, recalculateProductSummary, ensureProductBatches } from './utils/batchInventoryUtils';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -393,7 +394,11 @@ const App: React.FC = () => {
         const categoryName = (productCategory?.name || '').toUpperCase();
         const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
-        let itemCost = Number(product?.cost || 0);
+        let itemCost = item.costBasis !== undefined ? Number(item.costBasis) : (
+          item.variantId 
+            ? (Number(product?.variants?.find(v => v.id === item.variantId)?.cost) || Number(product?.cost || 0))
+            : Number(product?.cost || 0)
+        );
         if (isHotReload && itemCost === 0) {
           itemCost = Number(item.price) * 0.96; 
         }
@@ -442,32 +447,34 @@ const App: React.FC = () => {
         for (const item of tx.items) {
           const product = products.find(p => p.id === item.productId);
           if (product) {
-            const bStocks = { ...(product.branchStocks || {}) };
-            const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-
-            let quantityToDeduct = Number(item.quantity);
             const productCategory = categories.find(c => c.id === product.categoryId);
             const categoryName = (productCategory?.name || '').toUpperCase();
             const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
 
             if (isHotReload) {
-              quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
+              const bStocks = { ...(product.branchStocks || {}) };
+              const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
+              const quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
+              const updatedStock = Number(currentStock) - quantityToDeduct;
+              bStocks[stockBranch] = updatedStock;
+              const updatedProduct = {
+                ...product,
+                branchStocks: bStocks,
+                stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
+              };
+              setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
+              sideEffects.push(upsertDocument(dbCols.products, product.id, updatedProduct));
+            } else {
+              const quantityToDeduct = Number(item.quantity);
+              const { updatedProduct } = applySaleDeductionToProduct(
+                product,
+                quantityToDeduct,
+                stockBranch,
+                item.variantId
+              );
+              setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
+              sideEffects.push(upsertDocument(dbCols.products, product.id, sanitizeData(updatedProduct)));
             }
-
-            const updatedStock = isHotReload 
-              ? (Number(currentStock) - quantityToDeduct) 
-              : Math.max(0, Number(currentStock) - quantityToDeduct);
-
-            bStocks[stockBranch] = updatedStock;
-
-            const updatedProduct = {
-              ...product,
-              branchStocks: bStocks,
-              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
-            };
-
-            setProducts(prev => prev.map(p => p.id === product.id ? updatedProduct : p));
-            sideEffects.push(upsertDocument(dbCols.products, product.id, updatedProduct));
           }
         }
       }
@@ -644,51 +651,41 @@ const App: React.FC = () => {
       }
     }
 
-    // 4. Stock Adjustment for SALE transactions
+    // 4. Stock Adjustment for SALE transactions with FIFO Batch & Variant Support
     if ((oldTx.type === 'SALE' || tx.type === 'SALE') && (oldTx.items || tx.items)) {
       const activeBranch = userProfile.branch;
       const stockBranch = getStockBranch(activeBranch);
 
-      const stockChanges = new Map<string, number>();
-
-      if (oldTx.type === 'SALE' && oldTx.items) {
-        for (const oldItem of oldTx.items) {
-          const product = products.find(p => p.id === oldItem.productId);
-          const productCategory = categories.find(c => c.id === product?.categoryId);
-          const categoryName = (productCategory?.name || '').toUpperCase();
-          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
-          const amountToRestore = isHotReload ? (Number(oldItem.price) * Number(oldItem.quantity) * 0.96) : Number(oldItem.quantity);
-          stockChanges.set(oldItem.productId, (stockChanges.get(oldItem.productId) || 0) + amountToRestore);
-        }
-      }
-
       if (tx.type === 'SALE' && tx.items) {
+        let totalTxCostBasis = 0;
         for (const newItem of tx.items) {
           const product = products.find(p => p.id === newItem.productId);
-          const productCategory = categories.find(c => c.id === product?.categoryId);
-          const categoryName = (productCategory?.name || '').toUpperCase();
-          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
-          const amountToDeduct = isHotReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
-          stockChanges.set(newItem.productId, (stockChanges.get(newItem.productId) || 0) - amountToDeduct);
-        }
-      }
-
-      for (const [productId, netChange] of stockChanges.entries()) {
-        if (netChange !== 0) {
-          const product = products.find(p => p.id === productId);
           if (product) {
-            const bStocks = { ...(product.branchStocks || {}) };
-            const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-            const productCategory = categories.find(c => c.id === product.categoryId);
+            const productCategory = categories.find(c => c.id === product?.categoryId);
             const categoryName = (productCategory?.name || '').toUpperCase();
             const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
-            bStocks[stockBranch] = isHotReload ? (Number(currentStock) + netChange) : Math.max(0, Number(currentStock) + netChange);
-            await upsertDocument(dbCols.products, product.id, {
-              ...product,
-              branchStocks: bStocks,
-              stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0)
-            });
+            const qtyToDeduct = isHotReload ? (Number(newItem.price) * Number(newItem.quantity) * 0.96) : Number(newItem.quantity);
+
+            const { updatedProduct, costBasis, allocations } = applySaleDeductionToProduct(
+              product,
+              qtyToDeduct,
+              stockBranch,
+              newItem.variantId
+            );
+
+            if (newItem.costBasis === undefined) {
+              newItem.costBasis = costBasis;
+            }
+            if (!newItem.batchAllocations) {
+              newItem.batchAllocations = allocations;
+            }
+            totalTxCostBasis += (Number(newItem.costBasis) || 0) * Number(newItem.quantity);
+
+            await upsertDocument(dbCols.products, product.id, sanitizeData(updatedProduct));
           }
+        }
+        if (!tx.costBasis && totalTxCostBasis > 0) {
+          tx.costBasis = totalTxCostBasis;
         }
       }
     }
@@ -1033,16 +1030,20 @@ const App: React.FC = () => {
     for (const item of po.items) {
       const product = products.find(p => p.id === item.productId) || products.find(p => p.sku === item.productId) || products.find(p => p.name === item.productId);
       if (product) {
-        const bStocks = { ...(product.branchStocks || {}) };
-        const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-        bStocks[stockBranch] = Number(currentStock) + Number(item.quantity) + (Number(item.freeQuantity) || 0);
-
-        await upsertDocument(dbCols.products, product.id, {
-          ...product,
-          branchStocks: bStocks,
-          stock: ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, key) => a + (Number(bStocks[key]) || 0), 0),
-          cost: Number(item.cost)
-        });
+        const vendor = vendors.find(v => v.id === po.vendorId);
+        const totalReceivedQty = Number(item.quantity) + (Number(item.freeQuantity) || 0);
+        const updatedProduct = applyPurchaseToProduct(
+          product,
+          totalReceivedQty,
+          Number(item.cost),
+          stockBranch,
+          po.id,
+          vendor?.name,
+          item.variantId,
+          item.size,
+          item.sellingPrice
+        );
+        await upsertDocument(dbCols.products, product.id, sanitizeData(updatedProduct));
       }
     }
 

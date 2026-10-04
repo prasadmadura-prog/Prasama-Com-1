@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Product, PurchaseOrder, PurchaseOrderItem, POStatus, Vendor, UserProfile, BankAccount, Transaction, Category } from '../types';
+import { Product, ProductVariant, PurchaseOrder, PurchaseOrderItem, POStatus, Vendor, UserProfile, BankAccount, Transaction, Category } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { collections, upsertDocument, deleteDocument } from '../services/database';
 
@@ -49,6 +49,7 @@ const Purchases: React.FC<PurchasesProps> = ({
   const [isSettlementModalOpen, setIsSettlementModalOpen] = useState(false);
   const [isEditTxModalOpen, setIsEditTxModalOpen] = useState(false);
   const [vendorLedgerId, setVendorLedgerId] = useState<string | null>(null);
+  const [poSizePickerProduct, setPoSizePickerProduct] = useState<Product | null>(null);
 
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
@@ -419,22 +420,52 @@ const Purchases: React.FC<PurchasesProps> = ({
     return { vendor, stream: stream.reverse(), auditBalance: cumulative };
   }, [vendorLedgerId, vendors, purchaseOrders, transactions]);
 
-  const handleAddItemToPO = (product: Product) => {
-    const existing = poItems.find(i => i.productId === product.id);
-    if (existing) {
-      setPoItems(poItems.map(i => i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+  const handleAddItemToPO = (product: Product, variant?: ProductVariant) => {
+    if (!variant && product.hasSizes && Array.isArray(product.variants) && product.variants.length > 0) {
+      setPoSizePickerProduct(product);
+      return;
+    }
+
+    const itemVariantId = variant?.id;
+    const existingIndex = poItems.findIndex(i => 
+      i.productId === product.id && (itemVariantId ? i.variantId === itemVariantId : !i.variantId)
+    );
+
+    if (existingIndex !== -1) {
+      setPoItems(prev => {
+        const next = [...prev];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          quantity: Number(next[existingIndex].quantity) + 1
+        };
+        return next;
+      });
     } else {
-      setPoItems([{
+      const initialCost = variant ? (Number(variant.cost) || Number(product.cost) || 0) : (Number(product.cost) || 0);
+      const initialSelling = variant ? (Number(variant.price) || Number(product.price) || 0) : (Number(product.price) || 0);
+
+      setPoItems(prev => [{
         productId: product.id,
-        productName: product.name,
-        productSku: product.sku,
+        productName: variant ? `${product.name} [${variant.size}]` : product.name,
+        productSku: variant?.sku || product.sku,
         quantity: 1,
         freeQuantity: 0,
-        cost: product.cost,
+        cost: initialCost,
         discountPercent: 0,
-        discount: 0
-      }, ...poItems]);
+        discount: 0,
+        variantId: variant?.id,
+        size: variant?.size,
+        sellingPrice: initialSelling
+      }, ...prev]);
     }
+  };
+
+  const handleAddAllSizesToPO = (product: Product) => {
+    if (!product.variants || product.variants.length === 0) return;
+    product.variants.forEach(v => {
+      handleAddItemToPO(product, v);
+    });
+    setPoSizePickerProduct(null);
   };
 
   const updatePOItem = (index: number, field: keyof PurchaseOrderItem, value: string | number) => {
@@ -493,13 +524,16 @@ const Purchases: React.FC<PurchasesProps> = ({
           const discPct = Number(i.discountPercent !== undefined ? i.discountPercent : i.discount) || 0;
           return {
             productId: i.productId,
-            productName: product?.name || i.productName || 'Unknown Item',
-            productSku: product?.sku || i.productSku || 'N/A',
+            productName: (product?.name ? (i.size ? `${product.name} [${i.size}]` : product.name) : i.productName) || 'Unknown Item',
+            productSku: i.productSku || product?.sku || 'N/A',
             quantity: Number(i.quantity) || 0,
             freeQuantity: Number(i.freeQuantity) || 0,
             cost: Number(i.cost) || 0,
             discountPercent: discPct,
-            discount: discPct
+            discount: discPct,
+            variantId: i.variantId,
+            size: i.size,
+            sellingPrice: i.sellingPrice !== undefined ? Number(i.sellingPrice) : undefined
           };
         }),
         status: targetStatus,
@@ -1842,9 +1876,16 @@ const Purchases: React.FC<PurchasesProps> = ({
                                 <td className="px-6 py-3 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
                                 <td className="px-6 py-3">
                                   <div className="flex flex-col">
-                                    <p className="text-xs font-black text-slate-900 uppercase truncate max-w-[350px] leading-tight">
-                                      {product?.name || item.productName || 'Unknown Asset'}
-                                    </p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-xs font-black text-slate-900 uppercase truncate max-w-[320px] leading-tight">
+                                        {product?.name || item.productName || 'Unknown Asset'}
+                                      </p>
+                                      {item.size && (
+                                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-black text-[9px] uppercase tracking-wider">
+                                          Size {item.size}
+                                        </span>
+                                      )}
+                                    </div>
                                     <p className="text-[10px] font-bold text-indigo-500 uppercase truncate max-w-[350px] mt-0.5">
                                       {getVendorName(product?.vendorId)}
                                     </p>
@@ -1902,7 +1943,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                                   </div>
                                 </td>
                                 <td className="px-6 py-3 text-right">
-                                  <p className="text-[10px] font-bold text-slate-400 font-mono">Rs. {Number(product?.price || 0).toLocaleString()}</p>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={item.sellingPrice !== undefined ? item.sellingPrice : (item.variantId ? (product?.variants?.find(v => v.id === item.variantId)?.price ?? product?.price ?? 0) : (product?.price ?? 0))}
+                                    onFocus={e => e.target.select()}
+                                    onChange={e => updatePOItem(idx, 'sellingPrice', e.target.value)}
+                                    title="Edit Retail Selling Price for this size/batch"
+                                    className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 font-bold font-mono text-[11px] text-slate-700 text-right bg-white focus:border-indigo-500 outline-none"
+                                  />
                                 </td>
                                 <td className="px-6 py-3 text-right">
                                   <p className={`text-[10px] font-black font-mono ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
@@ -2236,6 +2285,87 @@ const Purchases: React.FC<PurchasesProps> = ({
           </div>
         )
       }
+
+      {/* PO SIZE PICKER MODAL */}
+      {poSizePickerProduct && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-600 block">Purchase Order Item</span>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                  {poSizePickerProduct.name}
+                </h3>
+                <p className="text-[10px] font-mono text-slate-400 font-bold">Select Size to Add to PO</p>
+              </div>
+              <button
+                onClick={() => setPoSizePickerProduct(null)}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black transition-all text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <div className="p-4 bg-indigo-50/50 border-b border-indigo-100 flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase text-indigo-900">Add Entire Size Run:</span>
+              <button
+                type="button"
+                onClick={() => handleAddAllSizesToPO(poSizePickerProduct)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shadow-md hover:scale-105 active:scale-95 transition-all"
+              >
+                ➕ Add All {poSizePickerProduct.variants?.length} Sizes
+              </button>
+            </div>
+
+            <div className="p-6 space-y-2.5 max-h-[55vh] overflow-y-auto">
+              {(poSizePickerProduct.variants || []).map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => {
+                    handleAddItemToPO(poSizePickerProduct, v);
+                    setPoSizePickerProduct(null);
+                  }}
+                  className="w-full flex items-center justify-between p-3.5 rounded-2xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/40 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-sm shadow group-hover:bg-indigo-600 transition-colors">
+                      {v.size}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-900 uppercase">Size {v.size}</span>
+                        <span className="text-[9px] font-mono text-slate-400">{v.sku}</span>
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[9px] font-bold text-slate-500">Current Cost: Rs. {Number(v.cost).toLocaleString()}</span>
+                        <span className="text-[9px] font-bold text-slate-400">•</span>
+                        <span className="text-[9px] font-bold text-slate-500">Stock: {v.stock}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] font-black font-mono text-indigo-600 block">
+                      Sell: Rs. {Number(v.price).toLocaleString()}
+                    </span>
+                    <span className="text-[9px] font-bold text-slate-400 group-hover:text-indigo-600 group-hover:underline">
+                      + Add to PO &rarr;
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setPoSizePickerProduct(null)}
+                className="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 };

@@ -1,10 +1,22 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import JsBarcode from 'jsbarcode';
-import { Product, Category } from '../types';
+import { Product, ProductVariant, Category } from '../types';
 
 interface BarcodePrintProps {
   products: Product[];
   categories: Category[];
+}
+
+interface PrintableUnit {
+  id: string;
+  productId: string;
+  product: Product;
+  variant?: ProductVariant;
+  name: string;
+  sku: string;
+  price: number;
+  size?: string;
+  extraDetails?: string;
 }
 
 type LabelSize = 'SMALL' | 'MEDIUM' | 'LARGE';
@@ -143,14 +155,46 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
     });
   }, [products, searchTerm, filterCategoryId]);
 
+  const printableUnits = useMemo(() => {
+    const list: PrintableUnit[] = [];
+    (filteredProducts || []).forEach(p => {
+      if (p.hasSizes && Array.isArray(p.variants) && p.variants.length > 0) {
+        p.variants.forEach(v => {
+          list.push({
+            id: `${p.id}__${v.id}`,
+            productId: p.id,
+            product: p,
+            variant: v,
+            name: `${p.name} [${v.size}]`,
+            sku: v.sku,
+            price: Number(v.price) || Number(p.price) || 0,
+            size: v.size,
+            extraDetails: p.extraDetails
+          });
+        });
+      } else {
+        list.push({
+          id: p.id,
+          productId: p.id,
+          product: p,
+          name: p.name,
+          sku: p.sku,
+          price: Number(p.price) || 0,
+          extraDetails: p.extraDetails
+        });
+      }
+    });
+    return list;
+  }, [filteredProducts]);
+
   const totalLabels = useMemo(() =>
     Object.values(selections).reduce((a: number, b: number) => a + b, 0)
     , [selections]);
 
-  const updateSelection = (productId: string, copies: number) => {
+  const updateSelection = (unitId: string, copies: number) => {
     setSelections(prev => ({
       ...prev,
-      [productId]: Math.max(0, copies)
+      [unitId]: Math.max(0, copies)
     }));
   };
 
@@ -170,8 +214,49 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
   };
 
   const handlePrint = () => {
-    const itemsToPrint = products.filter(p => (selections[p.id] || 0) > 0);
-    if (itemsToPrint.length === 0) return;
+    const unitsToPrint: { unit: PrintableUnit; count: number }[] = [];
+    (products || []).forEach(p => {
+      if (p.hasSizes && Array.isArray(p.variants) && p.variants.length > 0) {
+        p.variants.forEach(v => {
+          const key = `${p.id}__${v.id}`;
+          const count = selections[key] || 0;
+          if (count > 0) {
+            unitsToPrint.push({
+              unit: {
+                id: key,
+                productId: p.id,
+                product: p,
+                variant: v,
+                name: `${p.name} [SIZE: ${v.size}]`,
+                sku: v.sku,
+                price: Number(v.price) || Number(p.price) || 0,
+                size: v.size,
+                extraDetails: p.extraDetails
+              },
+              count
+            });
+          }
+        });
+      } else {
+        const count = selections[p.id] || 0;
+        if (count > 0) {
+          unitsToPrint.push({
+            unit: {
+              id: p.id,
+              productId: p.id,
+              product: p,
+              name: p.name,
+              sku: p.sku,
+              price: Number(p.price) || 0,
+              extraDetails: p.extraDetails
+            },
+            count
+          });
+        }
+      }
+    });
+
+    if (unitsToPrint.length === 0) return;
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -312,8 +397,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
         <div class="grid">
     `;
 
-    itemsToPrint.forEach(p => {
-      const count = selections[p.id];
+    unitsToPrint.forEach(({ unit, count }) => {
+      const p = unit.product;
       
       if (isC4) {
         const prodSettings = c4Products[p.id] || {};
@@ -453,7 +538,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
           `;
         }
       } else {
-        let barcodeValue = p.sku || '0000';
+        let barcodeValue = unit.sku || '0000';
         if (settings.cashierSuffix === 'CASHIER 1') barcodeValue += '200';
         else if (settings.cashierSuffix === 'CASHIER 2') barcodeValue += '300';
         else if (settings.cashierSuffix === 'CASHIER 3') barcodeValue += '400';
@@ -473,7 +558,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
         for (let i = 0; i < count; i++) {
           html += `<div class="label">
             <div class="footer" style="margin-bottom: 1mm;">
-              ${settings.showNotes && p.extraDetails ? `<div class="notes-footer" style="text-align: left; padding: 0; flex: 1;">${p.extraDetails}</div>` : '<div style="flex: 1;"></div>'}
+              ${settings.showNotes && (unit.extraDetails || p.extraDetails) ? `<div class="notes-footer" style="text-align: left; padding: 0; flex: 1;">${unit.extraDetails || p.extraDetails}</div>` : '<div style="flex: 1;"></div>'}
               <div class="company-name" style="margin-top: 0;">Prasama(Pvt)Ltd</div>
             </div>
             <div style="flex: 1; display: flex; flex-direction: row; align-items: center; justify-content: center; width: 100%; overflow: hidden;">
@@ -488,8 +573,8 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
               ></svg>
             </div>
             <div class="footer" style="margin-top: 1mm;">
-              ${settings.showPrice ? `<div class="price">Rs. ${Number(p.price || 0).toLocaleString()}</div>` : ''}
-              ${settings.showName ? `<div class="name" style="margin-bottom: 0; text-align: right; flex: 1; margin-left: 2mm;">${p.name}</div>` : ''}
+              ${settings.showPrice ? `<div class="price">Rs. ${Number(unit.price || p.price || 0).toLocaleString()}</div>` : ''}
+              ${settings.showName ? `<div class="name" style="margin-bottom: 0; text-align: right; flex: 1; margin-left: 2mm;">${unit.name}</div>` : ''}
             </div>
           </div>`;
         }
@@ -856,40 +941,47 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {filteredProducts.map(p => (
-                    <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
-                      <td className="px-8 py-5">
-                        <p className="font-black text-slate-900 text-[12px] tracking-tight">{p.name}</p>
-                        <p className="text-[10px] text-indigo-500 font-mono font-black uppercase mt-0.5">{p.sku}</p>
-                        {p.extraDetails && <p className="text-[9px] text-indigo-500 font-bold uppercase mt-1 italic">Extra: {p.extraDetails}</p>}
+                  {printableUnits.map(unit => (
+                    <tr key={unit.id} className="hover:bg-indigo-50/30 transition-all group">
+                      <td className="px-8 py-4">
+                        <div className="flex items-center gap-2">
+                          <p className="font-black text-slate-900 text-[12px] tracking-tight">{unit.product.name}</p>
+                          {unit.size && (
+                            <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-black text-[9px] uppercase tracking-wider">
+                              Size {unit.size}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-indigo-500 font-mono font-black uppercase mt-0.5">{unit.sku}</p>
+                        {unit.extraDetails && <p className="text-[9px] text-indigo-500 font-bold uppercase mt-0.5 italic">Extra: {unit.extraDetails}</p>}
                       </td>
-                      <td className="px-8 py-5">
+                      <td className="px-8 py-4">
                         <div className="flex items-center justify-center gap-4">
                           <button
-                            onMouseDown={() => startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) - 1))}
+                            onMouseDown={() => startContinuousAction(() => updateSelection(unit.id, (selections[unit.id] || 0) - 1))}
                             onMouseUp={stopContinuousAction}
                             onMouseLeave={stopContinuousAction}
-                            onTouchStart={(e) => { e.preventDefault(); startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) - 1)); }}
+                            onTouchStart={(e) => { e.preventDefault(); startContinuousAction(() => updateSelection(unit.id, (selections[unit.id] || 0) - 1)); }}
                             onTouchEnd={stopContinuousAction}
                             className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center font-black text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition-all active:scale-90 shadow-sm"
                           >-</button>
-                          <span className="w-10 text-center font-black text-slate-900 font-mono text-lg">{selections[p.id] || 0}</span>
+                          <span className="w-10 text-center font-black text-slate-900 font-mono text-lg">{selections[unit.id] || 0}</span>
                           <button
-                            onMouseDown={() => startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) + 1))}
+                            onMouseDown={() => startContinuousAction(() => updateSelection(unit.id, (selections[unit.id] || 0) + 1))}
                             onMouseUp={stopContinuousAction}
                             onMouseLeave={stopContinuousAction}
-                            onTouchStart={(e) => { e.preventDefault(); startContinuousAction(() => updateSelection(p.id, (selections[p.id] || 0) + 1)); }}
+                            onTouchStart={(e) => { e.preventDefault(); startContinuousAction(() => updateSelection(unit.id, (selections[unit.id] || 0) + 1)); }}
                             onTouchEnd={stopContinuousAction}
                             className="w-9 h-9 rounded-xl border border-slate-200 bg-white flex items-center justify-center font-black text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-all active:scale-90 shadow-sm"
                           >+</button>
                         </div>
                       </td>
-                      <td className="px-8 py-5 text-right">
-                        <p className="font-black text-slate-900 font-mono">{(Number(p.price) || 0).toLocaleString()}</p>
+                      <td className="px-8 py-4 text-right">
+                        <p className="font-black text-slate-900 font-mono">{(Number(unit.price) || 0).toLocaleString()}</p>
                       </td>
                     </tr>
                   ))}
-                  {filteredProducts.length === 0 && (
+                  {printableUnits.length === 0 && (
                     <tr>
                       <td colSpan={3} className="px-8 py-20 text-center text-slate-300 font-black uppercase tracking-widest text-[10px] italic">No inventory assets matched your search query.</td>
                     </tr>

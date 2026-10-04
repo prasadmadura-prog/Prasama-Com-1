@@ -1,10 +1,41 @@
 
+export interface ProductBatch {
+  id: string;
+  batchNumber?: string;
+  purchaseOrderId?: string;
+  timestamp: number;
+  date?: string;
+  purchaseCost: number;        // Cost price for this specific batch
+  initialQuantity: number;    // Quantity originally purchased in this batch
+  remainingQuantity: number;  // Available unsold quantity in this batch
+  supplierName?: string;
+}
+
+export interface ProductVariant {
+  id: string;                 // Unique variant ID, e.g. "var-10001-M"
+  size: string;               // e.g. "S", "M", "L", "XL", "XXL"
+  sku: string;                // Barcode for this exact size/variation
+  price: number;              // Selling price for this size
+  cost: number;               // Latest cost price or default cost price
+  costPrice?: number;         // Compatibility alias
+  stock: number;              // Current total in-stock quantity for this size
+  branchStocks?: Record<string, number>; // Cashier 1, Cashier 2, etc.
+  batches?: ProductBatch[];   // Purchase batches with costs & remaining stock
+}
+
+export interface BatchAllocation {
+  batchId: string;
+  quantity: number;
+  costPrice: number;
+}
+
 export interface Product {
   id: string;
   name: string;
   sku: string;
   price: number;
   cost: number;
+  costPrice?: number;
   stock: number;
   branchStocks?: Record<string, number>;
   categoryId: string;
@@ -17,6 +48,10 @@ export interface Product {
   c4FreeText?: string;
   c4FreeTextSinhala?: string;
   imageUrl?: string;
+  hasSizes?: boolean;
+  variants?: ProductVariant[];
+  batches?: ProductBatch[];
+  costingMethod?: 'FIFO' | 'WEIGHTED_AVG';
 }
 
 export interface Category {
@@ -58,6 +93,9 @@ export interface PurchaseOrderItem {
   cost: number;
   discount?: number; // Line item discount
   discountPercent?: number; // Line item discount percentage
+  variantId?: string; // For sized products
+  size?: string;      // e.g. "S", "M", "L"
+  sellingPrice?: number; // Configurable new selling price
 }
 
 export interface ChequeItem {
@@ -110,6 +148,17 @@ export interface Quotation {
   userId?: string;
 }
 
+export interface TransactionItem {
+  productId: string;
+  quantity: number;
+  price: number;
+  discount?: number;
+  variantId?: string;
+  size?: string;
+  costBasis?: number;
+  batchAllocations?: BatchAllocation[];
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -118,7 +167,7 @@ export interface Transaction {
   paidAmount?: number;
   balanceDue?: number;
   discount?: number;
-  items?: { productId: string; quantity: number; price: number; discount?: number }[];
+  items?: TransactionItem[];
   description: string;
   paymentMethod: 'CASH' | 'BANK' | 'CARD' | 'CREDIT' | 'CHEQUE';
   accountId?: string;
@@ -207,14 +256,19 @@ export interface FixedAsset {
 
 export type View = 'LOGIN' | 'DASHBOARD' | 'POS' | 'QUOTATIONS' | 'SALES_HISTORY' | 'KPI' | 'INVENTORY' | 'PURCHASES' | 'FINANCE' | 'CUSTOMERS' | 'CHEQUE_PRINT' | 'BARCODE_PRINT' | 'SETTINGS' | 'ACCOUNTING' | 'RELOAD' | 'USER_CONTROL' | 'FIXED_ASSETS' | 'ACCOUNTING_LIABILITIES' | 'REPORTS';
 
+export interface POSCartItem {
+  product: Product;
+  qty: number;
+  price: number;
+  discount: number;
+  discountType: 'AMT' | 'PCT';
+  variantId?: string;
+  selectedSize?: string;
+  costBasis?: number;
+}
+
 export interface POSSession {
-  cart: {
-    product: Product;
-    qty: number;
-    price: number;
-    discount: number;
-    discountType: 'AMT' | 'PCT'
-  }[];
+  cart: POSCartItem[];
   discount: number;
   discountPercent: number;
   globalDiscountType: 'AMT' | 'PCT';

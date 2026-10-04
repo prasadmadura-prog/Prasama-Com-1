@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Product, Transaction, Customer, Category, UserProfile, DaySession, BankAccount, POSSession } from '../types';
+import { Product, Transaction, Customer, Category, UserProfile, DaySession, BankAccount, POSSession, ProductVariant } from '../types';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { formatDate } from '../utils/dateFormatter';
+import { findItemOrVariantByBarcode } from '../utils/batchInventoryUtils';
 
 interface POSProps {
   products: Product[];
@@ -47,9 +48,16 @@ const POS: React.FC<POSProps> = ({
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<any>(null);
   const [activeTerminal, setActiveTerminal] = useState(userProfile.branch || 'CASHIER 1'); // State for active terminal
+  const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null);
   const completedTxIdsRef = useRef<Set<string>>(new Set());
 
-  const getAvailableStock = (product: Product) => {
+  const getAvailableStock = (product: Product, variant?: ProductVariant) => {
+    if (variant) {
+      if (variant.branchStocks && variant.branchStocks[activeTerminal] !== undefined) {
+        return Number(variant.branchStocks[activeTerminal]);
+      }
+      return Number(variant.stock || 0);
+    }
     if (product.branchStocks && product.branchStocks[activeTerminal] !== undefined) {
       return Number(product.branchStocks[activeTerminal]);
     }
@@ -58,11 +66,17 @@ const POS: React.FC<POSProps> = ({
 
   const getProductBySkuOrId = (term: string) => {
     const trimmed = term.trim();
-    // 1. Try exact match first
-    let product = products.find(p => p.sku === trimmed || p.id === trimmed);
+    // 1. Check size variants first or exact product barcode
+    const match = findItemOrVariantByBarcode(products, trimmed);
+    if (match) {
+      return { product: match.product, variant: match.variant, detectedBranch: null };
+    }
+
+    // 2. Try exact ID match
+    let product = products.find(p => p.id === trimmed);
     let detectedBranch: string | null = null;
 
-    // 2. If no exact match and term is longer than 3 characters, check for cashier suffix
+    // 3. If no exact match and term is longer than 3 characters, check for cashier suffix
     if (!product && trimmed.length > 3) {
       const suffix = trimmed.slice(-3);
       const baseSku = trimmed.slice(0, -3);
@@ -74,13 +88,13 @@ const POS: React.FC<POSProps> = ({
       else if (suffix === '500') matchedBranch = 'CASHIER 4';
 
       if (matchedBranch) {
-        product = products.find(p => p.sku === baseSku);
-        if (product) {
-          detectedBranch = matchedBranch;
+        const baseMatch = findItemOrVariantByBarcode(products, baseSku);
+        if (baseMatch) {
+          return { product: baseMatch.product, variant: baseMatch.variant, detectedBranch: matchedBranch };
         }
       }
     }
-    return { product, detectedBranch };
+    return { product, variant: undefined, detectedBranch };
   };
 
   const getTodayLocal = () => {
@@ -471,7 +485,7 @@ const POS: React.FC<POSProps> = ({
 
   // getAvailableStock is defined at the top of the component
 
-  const addToCart = (product: Product) => {
+  const addToCart = (product: Product, variant?: ProductVariant) => {
     if (!isDayOpen) {
       const balance = prompt(`Terminal session for ${activeTerminal} is not open for today.\nEnter Opening Float (Rs.) to open session and proceed:`, "0");
       if (balance !== null) {
@@ -481,6 +495,17 @@ const POS: React.FC<POSProps> = ({
       }
     }
 
+    // If product has sizes and no specific variant was provided, open the size selection modal!
+    if (!variant && product.hasSizes && Array.isArray(product.variants) && product.variants.length > 0) {
+      setSizePickerProduct(product);
+      return;
+    }
+
+    const itemPrice = variant ? (Number(variant.price) || Number(product.price)) : Number(product.price);
+    const itemCost = variant ? (Number(variant.cost) || Number(product.cost)) : Number(product.cost);
+    const itemVariantId = variant?.id;
+    const itemSize = variant?.size;
+
     setPosSession((prev: POSSession) => {
       // Generate transaction ID ONLY when cart is empty (new transaction starting)
       if (prev.cart.length === 0 && !currentDraftId) {
@@ -488,23 +513,52 @@ const POS: React.FC<POSProps> = ({
         setCurrentDraftId(newTxId);
       }
 
-      const existing = prev.cart.find((item: any) => item.product.id === product.id);
-      if (existing) {
-        return { ...prev, cart: prev.cart.map((item: any) => item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item) };
+      const existingIndex = prev.cart.findIndex((item: any) => 
+        item.product.id === product.id && (itemVariantId ? item.variantId === itemVariantId : !item.variantId)
+      );
+
+      if (existingIndex !== -1) {
+        const newCart = [...prev.cart];
+        newCart[existingIndex] = {
+          ...newCart[existingIndex],
+          qty: newCart[existingIndex].qty + 1
+        };
+        return { ...prev, cart: newCart };
       }
-      return { ...prev, cart: [{ product, qty: 1, price: product.price, discount: 0, discountType: 'AMT' }, ...prev.cart] };
+
+      return {
+        ...prev,
+        cart: [
+          {
+            product,
+            qty: 1,
+            price: itemPrice,
+            discount: 0,
+            discountType: 'AMT',
+            variantId: itemVariantId,
+            selectedSize: itemSize,
+            costBasis: itemCost
+          },
+          ...prev.cart
+        ]
+      };
     });
   };
 
-  const updateCartQty = (id: string, newQty: number) => {
+  const updateCartQty = (id: string, newQty: number, variantId?: string) => {
     setPosSession((prev: POSSession) => {
       if (newQty <= 0) {
-        return { ...prev, cart: prev.cart.filter((item: any) => item.product.id !== id) };
+        return {
+          ...prev,
+          cart: prev.cart.filter((item: any) => 
+            !(item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId))
+          )
+        };
       }
       return {
         ...prev,
         cart: prev.cart.map((item: any) => {
-          if (item.product.id === id) {
+          if (item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId)) {
             return { ...item, qty: newQty };
           }
           return item;
@@ -513,17 +567,25 @@ const POS: React.FC<POSProps> = ({
     });
   };
 
-  const updateLinePrice = (id: string, newPrice: number) => {
+  const updateLinePrice = (id: string, newPrice: number, variantId?: string) => {
     setPosSession((prev: POSSession) => ({
       ...prev,
-      cart: prev.cart.map((item: any) => item.product.id === id ? { ...item, price: newPrice } : item)
+      cart: prev.cart.map((item: any) => 
+        (item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId)) 
+          ? { ...item, price: newPrice } 
+          : item
+      )
     }));
   };
 
-  const updateLineDiscount = (id: string, value: number, type: 'AMT' | 'PCT') => {
+  const updateLineDiscount = (id: string, value: number, type: 'AMT' | 'PCT', variantId?: string) => {
     setPosSession((prev: POSSession) => ({
       ...prev,
-      cart: prev.cart.map((item: any) => item.product.id === id ? { ...item, discount: value, discountType: type } : item)
+      cart: prev.cart.map((item: any) => 
+        (item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId)) 
+          ? { ...item, discount: value, discountType: type } 
+          : item
+      )
     }));
   };
 
@@ -578,12 +640,12 @@ const POS: React.FC<POSProps> = ({
   };
 
   const handleScan = (decodedText: string) => {
-    const { product, detectedBranch } = getProductBySkuOrId(decodedText);
+    const { product, variant, detectedBranch } = getProductBySkuOrId(decodedText);
     if (product) {
       if (detectedBranch) {
         setActiveTerminal(detectedBranch);
       }
-      addToCart(product);
+      addToCart(product, variant);
       setShowScanner(false);
     }
   };
@@ -632,7 +694,10 @@ const POS: React.FC<POSProps> = ({
               productId: i.product.id,
               quantity: i.qty,
               price: i.price,
-              discount: itemDiscount
+              discount: itemDiscount,
+              variantId: i.variantId,
+              size: i.selectedSize,
+              costBasis: i.costBasis
             };
           })
         };
@@ -656,7 +721,7 @@ const POS: React.FC<POSProps> = ({
     const effectivePaidAmount = isAdvance ? advanceAmount : (paymentMethod === 'CREDIT' ? 0 : totals.finalTotal);
     const effectiveBalanceDue = isAdvance ? (totals.finalTotal - (advanceAmount || 0)) : (paymentMethod === 'CREDIT' ? totals.finalTotal : 0);
 
-    const txCostBasis = cart.reduce((acc, item) => acc + (item.product.cost || 0) * item.qty, 0);
+    const txCostBasis = cart.reduce((acc, item) => acc + (item.costBasis ?? item.product.cost ?? 0) * item.qty, 0);
     const txPayload = {
       id: txId,
       type: 'SALE' as const,
@@ -683,7 +748,10 @@ const POS: React.FC<POSProps> = ({
           productId: i.product.id,
           quantity: i.qty,
           price: i.price,
-          discount: itemDiscount
+          discount: itemDiscount,
+          variantId: i.variantId,
+          size: i.selectedSize,
+          costBasis: i.costBasis
         };
       })
     };
@@ -1047,12 +1115,12 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                   if (!term) return;
 
                   // Priority 1: Exact SKU/ID Match or Cashier Suffix SKU Match
-                  const { product, detectedBranch } = getProductBySkuOrId(term);
+                  const { product, variant, detectedBranch } = getProductBySkuOrId(term);
                   if (product) {
                     if (detectedBranch) {
                       setActiveTerminal(detectedBranch);
                     }
-                    addToCart(product);
+                    addToCart(product, variant);
                     setPosSession(prev => ({ ...prev, search: '' }));
                     return;
                   }
@@ -1295,32 +1363,40 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
 
             <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
               {cart.map(item => {
-                const isDiscounting = activeLineDiscountId === item.product.id;
-                const isEditing = activeLineEditId === item.product.id;
+                const itemKey = item.variantId ? `${item.product.id}_${item.variantId}` : item.product.id;
+                const isDiscounting = activeLineDiscountId === itemKey;
+                const isEditing = activeLineEditId === itemKey;
                 const itemGross = item.price * item.qty;
                 const itemDiscountAmt = item.discountType === 'PCT' ? (itemGross * item.discount) / 100 : item.discount;
                 const itemNet = itemGross - itemDiscountAmt;
 
                 return (
-                  <div key={item.product.id} className="rounded-lg bg-white border border-slate-100 hover:border-indigo-100 transition-all">
+                  <div key={itemKey} className="rounded-lg bg-white border border-slate-100 hover:border-indigo-100 transition-all">
                     <div className="flex items-center justify-between p-1.5 gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-[10px] font-black text-slate-800 truncate uppercase leading-none">{item.product.name}</p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-[10px] font-black text-slate-800 truncate uppercase leading-none">{item.product.name}</p>
+                          {item.selectedSize && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-black text-[8px] tracking-wider uppercase">
+                              {item.selectedSize}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[8px] font-mono font-bold text-slate-400 mt-0.5">
                           {item.price !== item.product.price ? `Rs. ${item.price.toLocaleString()}` : `Rs. ${item.product.price.toLocaleString()}`}
                         </p>
                       </div>
 
                       <div className="flex items-center gap-1 bg-slate-50 rounded-md p-0.5 border border-slate-100 shrink-0">
-                        <button onClick={() => startAction(() => updateCartQty(item.product.id, item.qty - 1))} className="w-5 h-5 rounded bg-white flex items-center justify-center font-black text-slate-500 text-[10px]">-</button>
+                        <button onClick={() => startAction(() => updateCartQty(item.product.id, item.qty - 1, item.variantId))} className="w-5 h-5 rounded bg-white flex items-center justify-center font-black text-slate-500 text-[10px]">-</button>
                         <input
                           type="number"
                           value={item.qty}
-                          onChange={(e) => updateCartQty(item.product.id, parseInt(e.target.value) || 0)}
+                          onChange={(e) => updateCartQty(item.product.id, parseInt(e.target.value) || 0, item.variantId)}
                           className="w-8 text-[10px] font-black text-center text-slate-700 bg-transparent border-none outline-none appearance-none"
                           min="0"
                         />
-                        <button onClick={() => startAction(() => updateCartQty(item.product.id, item.qty + 1))} className="w-5 h-5 rounded bg-white flex items-center justify-center font-black text-slate-500 text-[10px]">+</button>
+                        <button onClick={() => startAction(() => updateCartQty(item.product.id, item.qty + 1, item.variantId))} className="w-5 h-5 rounded bg-white flex items-center justify-center font-black text-slate-500 text-[10px]">+</button>
                       </div>
 
                       <div className="w-20 text-right shrink-0">
@@ -1330,7 +1406,7 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                       <div className="flex gap-0.5 shrink-0">
                         <button
                           onClick={() => {
-                            setActiveLineEditId(isEditing ? null : item.product.id);
+                            setActiveLineEditId(isEditing ? null : itemKey);
                             setActiveLineDiscountId(null);
                           }}
                           className={`w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all ${isEditing ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-300 hover:text-indigo-500'}`}
@@ -1339,7 +1415,7 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                         </button>
                         <button
                           onClick={() => {
-                            setActiveLineDiscountId(isDiscounting ? null : item.product.id);
+                            setActiveLineDiscountId(isDiscounting ? null : itemKey);
                             setActiveLineEditId(null);
                           }}
                           className={`w-5 h-5 rounded flex items-center justify-center text-[10px] transition-all ${item.discount > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-300 hover:text-emerald-500'}`}
@@ -1358,7 +1434,7 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                               type="number"
                               className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[9px] font-black font-mono text-white outline-none focus:border-indigo-500"
                               value={item.price}
-                              onChange={(e) => updateLinePrice(item.product.id, parseFloat(e.target.value) || 0)}
+                              onChange={(e) => updateLinePrice(item.product.id, parseFloat(e.target.value) || 0, item.variantId)}
                             />
                           </div>
                           <div className="space-y-0.5">
@@ -1367,7 +1443,7 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                               type="number"
                               className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[9px] font-black font-mono text-white outline-none focus:border-indigo-500"
                               value={item.qty}
-                              onChange={(e) => updateCartQty(item.product.id, parseInt(e.target.value) || 0)}
+                              onChange={(e) => updateCartQty(item.product.id, parseInt(e.target.value) || 0, item.variantId)}
                             />
                           </div>
                         </div>
@@ -1377,15 +1453,15 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                     {isDiscounting && (
                       <div className="p-1.5 bg-slate-50 mx-1 mb-1 rounded-md border border-slate-200 flex items-center gap-1.5 animate-in slide-in-from-top-2">
                         <div className="flex bg-white rounded border border-slate-200 overflow-hidden shadow-inner">
-                          <button onClick={() => updateLineDiscount(item.product.id, item.discount, 'AMT')} className={`px-1.5 py-0.5 text-[7px] font-black uppercase ${item.discountType === 'AMT' ? 'bg-slate-900 text-white' : 'text-slate-400'}`}>Rs</button>
-                          <button onClick={() => updateLineDiscount(item.product.id, item.discount, 'PCT')} className={`px-1.5 py-0.5 text-[7px] font-black uppercase ${item.discountType === 'PCT' ? 'bg-slate-900 text-white' : 'text-slate-400'}`}>%</button>
+                          <button onClick={() => updateLineDiscount(item.product.id, item.discount, 'AMT', item.variantId)} className={`px-1.5 py-0.5 text-[7px] font-black uppercase ${item.discountType === 'AMT' ? 'bg-slate-900 text-white' : 'text-slate-400'}`}>Rs</button>
+                          <button onClick={() => updateLineDiscount(item.product.id, item.discount, 'PCT', item.variantId)} className={`px-1.5 py-0.5 text-[7px] font-black uppercase ${item.discountType === 'PCT' ? 'bg-slate-900 text-white' : 'text-slate-400'}`}>%</button>
                         </div>
                         <input
                           type="number"
                           className="flex-1 bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[9px] font-black font-mono text-indigo-600 outline-none"
                           value={item.discount || ''}
                           placeholder="0"
-                          onChange={(e) => updateLineDiscount(item.product.id, parseFloat(e.target.value) || 0, item.discountType)}
+                          onChange={(e) => updateLineDiscount(item.product.id, parseFloat(e.target.value) || 0, item.discountType, item.variantId)}
                           autoFocus
                         />
                         <button onClick={() => setActiveLineDiscountId(null)} className="text-[8px] font-black text-slate-400 hover:text-slate-900">OK</button>
@@ -1745,6 +1821,82 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SIZE / VARIANT PICKER MODAL */}
+      {sizePickerProduct && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-600 block">Select Size Variation</span>
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                  {sizePickerProduct.name}
+                </h3>
+                <p className="text-[10px] font-mono text-slate-400 font-bold">Base SKU: {sizePickerProduct.sku}</p>
+              </div>
+              <button
+                onClick={() => setSizePickerProduct(null)}
+                className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black transition-all text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 space-y-3 max-h-[60vh] overflow-y-auto">
+              {(sizePickerProduct.variants || []).map(v => {
+                const variantStock = getAvailableStock(sizePickerProduct, v);
+                const isOutOfStock = variantStock <= 0;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => {
+                      addToCart(sizePickerProduct, v);
+                      setSizePickerProduct(null);
+                    }}
+                    className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-left group ${
+                      isOutOfStock
+                        ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400'
+                        : 'bg-white border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/30 hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-base shadow group-hover:bg-indigo-600 transition-colors">
+                        {v.size}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-slate-900 uppercase">Size {v.size}</span>
+                          <span className="text-[9px] font-mono font-bold text-slate-400">Barcode: {v.sku}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                            isOutOfStock ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            Stock: {variantStock} Units
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black font-mono text-slate-900 block group-hover:text-indigo-600">
+                        Rs. {Number(v.price).toLocaleString()}
+                      </span>
+                      <span className="text-[9px] font-bold text-indigo-600 uppercase group-hover:underline">Select &rarr;</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setSizePickerProduct(null)}
+                className="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs uppercase"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
