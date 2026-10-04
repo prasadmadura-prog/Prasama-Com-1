@@ -177,13 +177,13 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   const filteredEntries = useMemo(() => {
     return ledgerEntries
       .filter(s => {
-        const search = searchTerm.toLowerCase();
+        const search = (searchTerm || '').toLowerCase();
         const txId = (s.id || "").toLowerCase();
-        const customerName = (customers.find(c => c.id === s.customerId)?.name || "Walk-in").toLowerCase();
+        const customerName = (customers.find(c => c && c.id === s.customerId)?.name || "Walk-in").toLowerCase();
 
         const matchesProduct = s.items?.some(it => {
-          const p = products.find(prod => prod.id === it.productId);
-          return p?.name.toLowerCase().includes(search);
+          const p = (products || []).find(prod => prod && prod.id === it.productId);
+          return (p?.name || '').toLowerCase().includes(search);
         }) || false;
 
         const matchesSearch = !searchTerm || txId.includes(search) || customerName.includes(search) || matchesProduct;
@@ -438,9 +438,12 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
   const filteredPickerProducts = useMemo(() => {
     if (!itemSearch.trim()) return [];
-    return products.filter(p =>
-      p.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(itemSearch.toLowerCase())
+    const sTerm = itemSearch.toLowerCase();
+    return (products || []).filter(p =>
+      p && (
+        (p.name || '').toLowerCase().includes(sTerm) ||
+        (p.sku || '').toLowerCase().includes(sTerm)
+      )
     ).slice(0, 5);
   }, [products, itemSearch]);
 

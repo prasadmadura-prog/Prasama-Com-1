@@ -34,9 +34,11 @@ const FixedAssets: React.FC<FixedAssetsProps> = ({
         return ['ALL', ...Array.from(cats)];
     }, [assetsAsOfDate]);
 
-    const filteredAssets = assetsAsOfDate.filter(a => {
-        const matchesSearch = a.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                             (a.serialNumber || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const filteredAssets = (assetsAsOfDate || []).filter(a => {
+        if (!a) return false;
+        const sTerm = (searchTerm || '').toLowerCase();
+        const matchesSearch = (a.name || '').toLowerCase().includes(sTerm) || 
+                             (a.serialNumber || '').toLowerCase().includes(sTerm);
         const matchesCategory = categoryFilter === 'ALL' || a.category === categoryFilter;
         return matchesSearch && matchesCategory;
     });

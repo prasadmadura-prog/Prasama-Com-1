@@ -173,8 +173,8 @@ const Inventory: React.FC<InventoryProps> = ({
         'CASHIER 4': 0
       });
       setSelectedStoreForStock('CASHIER 1');
-      if (categories.length > 0 && !selectedCategoryId) {
-        setSelectedCategoryId(categories[0].id);
+      if ((categories || []).length > 0 && !selectedCategoryId) {
+        setSelectedCategoryId(categories[0]?.id || '');
       }
       if (isModalOpen) {
         setSkuValue(getNextSku());
@@ -206,14 +206,14 @@ const Inventory: React.FC<InventoryProps> = ({
   };
 
   const getNextSku = () => {
-    const numericSkus = products
-      .map(p => parseInt(p.sku))
+    const numericSkus = (products || [])
+      .map(p => (p && p.sku ? parseInt(p.sku) : NaN))
       .filter(n => !isNaN(n));
     const maxSku = numericSkus.length > 0 ? Math.max(...numericSkus) : 1000;
     return (maxSku + 1).toString();
   };
 
-  const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || 'Uncategorized';
+  const getCategoryName = (id: string) => (categories || []).find(c => c && c.id === id)?.name || 'Uncategorized';
 
   const handleDownloadSample = () => {
     const headers = ['Name', 'SKU', 'Cost', 'Price', 'Stock', 'Category', 'Primary Vendor', 'Alert Threshold'];
@@ -487,7 +487,7 @@ const Inventory: React.FC<InventoryProps> = ({
             </div>
             <select value={filterCategoryId} onChange={(e) => setFilterCategoryId(e.target.value)} className="px-8 py-4 rounded-[2rem] border border-slate-200 text-xs font-black uppercase bg-white cursor-pointer focus:border-indigo-500 transition-all">
               <option value="All">All Categories</option>
-              {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+              {(categories || []).filter(c => c && c.id).map(cat => <option key={cat.id} value={cat.id}>{cat.name || 'Unnamed'}</option>)}
             </select>
             <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="px-8 py-4 rounded-[2rem] border border-slate-200 text-xs font-black uppercase bg-white cursor-pointer focus:border-indigo-500 transition-all">
               <option value="ALL CASHIERS">ALL CASHIERS</option>
@@ -697,7 +697,7 @@ const Inventory: React.FC<InventoryProps> = ({
                 <div className="min-w-0 flex-1 pr-4">
                   <h3 className="font-black text-slate-900 uppercase tracking-tighter text-lg leading-none truncate mb-2">{cat.name}</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] opacity-80">
-                    {products.filter(p => p.categoryId === cat.id).length} Products Linked
+                    {(products || []).filter(p => p && p.categoryId === cat.id).length} Products Linked
                   </p>
                 </div>
                 <div className="flex gap-2 shrink-0">
@@ -862,7 +862,7 @@ const Inventory: React.FC<InventoryProps> = ({
                       </div>
                       <select className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black bg-white outline-none cursor-pointer uppercase text-[12px] focus:border-indigo-500 transition-all" value={selectedCategoryId} onChange={(e) => setSelectedCategoryId(e.target.value)}>
                         <option value="">UNCATEGORIZED</option>
-                        {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                        {(categories || []).filter(c => c && c.id).map(cat => <option key={cat.id} value={cat.id}>{cat.name || 'Unnamed'}</option>)}
                       </select>
                     </div>
                   </div>

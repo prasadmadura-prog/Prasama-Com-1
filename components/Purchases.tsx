@@ -143,20 +143,20 @@ const Purchases: React.FC<PurchasesProps> = ({
   };
 
   const sortedProducts = useMemo(() => {
-    return [...products].sort((a, b) => a.name.localeCompare(b.name));
+    return [...(products || [])].filter(Boolean).sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
   }, [products]);
 
   // Sort POs by date descending (latest at top) and filter by search
   const filteredPOs = useMemo(() => {
-    let list = [...purchaseOrders];
+    let list = [...(purchaseOrders || [])].filter(Boolean);
     if (poSearch) {
-      const q = poSearch.toLowerCase();
+      const q = (poSearch || '').toLowerCase();
       list = list.filter(po => {
-        const vName = getVendorName(po.vendorId).toLowerCase();
-        return po.id.toLowerCase().includes(q) || vName.includes(q);
+        const vName = (getVendorName(po.vendorId) || '').toLowerCase();
+        return (po.id || '').toLowerCase().includes(q) || vName.includes(q);
       });
     }
-    return list.sort((a, b) => b.date.localeCompare(a.date));
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [purchaseOrders, poSearch, vendors]);
 
   const totalPages = Math.ceil(filteredPOs.length / ITEMS_PER_PAGE);
@@ -166,8 +166,10 @@ const Purchases: React.FC<PurchasesProps> = ({
   }, [filteredPOs, currentPage]);
 
   const filteredPickerProducts = useMemo(() => {
-    return sortedProducts.filter(p => {
-      const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase());
+    const sTerm = (productSearch || '').toLowerCase();
+    return (sortedProducts || []).filter(p => {
+      if (!p) return false;
+      const matchesSearch = (p.name || '').toLowerCase().includes(sTerm) || (p.sku || '').toLowerCase().includes(sTerm);
       const matchesCat = selectedCatId === 'All' || p.categoryId === selectedCatId;
       return matchesSearch && matchesCat;
     });
@@ -1209,12 +1211,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {Array.isArray(vendors) && vendors.length > 0 ? vendors
-                    .filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase()))
+                    .filter(v => v && (v.name || '').toLowerCase().includes((vendorSearch || '').toLowerCase()))
                     .sort((a, b) => {
-                      const balanceA = Number(a.totalBalance) || 0;
-                      const balanceB = Number(b.totalBalance) || 0;
+                      const balanceA = Number(a?.totalBalance) || 0;
+                      const balanceB = Number(b?.totalBalance) || 0;
                       if (balanceB !== balanceA) return balanceB - balanceA;
-                      return a.name.localeCompare(b.name);
+                      return (a?.name || '').localeCompare(b?.name || '');
                     })
                     .slice(0, 50)
                     .map(v => (

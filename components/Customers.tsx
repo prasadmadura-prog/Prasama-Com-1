@@ -108,17 +108,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
   };
 
   const filteredCustomers = useMemo(() => {
-    let result = customers;
+    let result = (customers || []).filter(Boolean);
     if (searchTerm.trim()) {
       const lowerSearch = searchTerm.toLowerCase();
-      result = customers.filter(c =>
-        c.name.toLowerCase().includes(lowerSearch) ||
-        c.phone.includes(searchTerm) ||
-        c.email.toLowerCase().includes(lowerSearch)
+      result = result.filter(c =>
+        (c.name || '').toLowerCase().includes(lowerSearch) ||
+        (c.phone || '').includes(searchTerm) ||
+        (c.email || '').toLowerCase().includes(lowerSearch)
       );
     }
     // Sort by outstanding (high to low)
-    return result.sort((a, b) => b.totalCredit - a.totalCredit).slice(0, 50);
+    return [...result].sort((a, b) => (Number(b?.totalCredit) || 0) - (Number(a?.totalCredit) || 0)).slice(0, 50);
   }, [customers, searchTerm]);
 
   const customerHistory = useMemo(() => {
@@ -211,9 +211,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
 
   const filteredPickerProducts = useMemo(() => {
     if (!itemSearch.trim()) return [];
-    return products.filter(p =>
-      p.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(itemSearch.toLowerCase())
+    const s = itemSearch.toLowerCase();
+    return (products || []).filter(p =>
+      p && (
+        (p.name || '').toLowerCase().includes(s) ||
+        (p.sku || '').toLowerCase().includes(s)
+      )
     ).slice(0, 5);
   }, [products, itemSearch]);
 

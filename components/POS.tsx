@@ -137,21 +137,27 @@ const POS: React.FC<POSProps> = ({
       }
     }
 
-    return products.filter(p => {
-      const matchesSearch = !search.trim() ||
-        (p.name || "").toLowerCase().includes(search.toLowerCase()) ||
-        (p.sku || "").toLowerCase().includes(search.toLowerCase()) ||
-        (p.sku || "").toLowerCase().includes(baseSearch.toLowerCase()) ||
-        (p.internalNotes || "").toLowerCase().includes(search.toLowerCase()) ||
-        (p.extraDetails || "").toLowerCase().includes(search.toLowerCase());
+    const sTerm = (search || '').toLowerCase();
+    const bTerm = (baseSearch || '').toLowerCase();
+    return (products || []).filter(p => {
+      if (!p) return false;
+      const matchesSearch = !sTerm.trim() ||
+        (p.name || "").toLowerCase().includes(sTerm) ||
+        (p.sku || "").toLowerCase().includes(sTerm) ||
+        (p.sku || "").toLowerCase().includes(bTerm) ||
+        (p.internalNotes || "").toLowerCase().includes(sTerm) ||
+        (p.extraDetails || "").toLowerCase().includes(sTerm);
 
       const matchesCat = !categoryId || categoryId === 'All' || p.categoryId === categoryId;
 
       return matchesSearch && matchesCat;
-    }).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    }).sort((a, b) => (a?.name || "").localeCompare(b?.name || ""));
   }, [search, categoryId, products, activeTerminal]);
 
-  const filteredCustomers = useMemo(() => customers.filter(c => c && c.name && (c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.phone && c.phone.includes(customerSearch)))), [customers, customerSearch]);
+  const filteredCustomers = useMemo(() => {
+    const cTerm = (customerSearch || '').toLowerCase();
+    return (customers || []).filter(c => c && c.name && (c.name.toLowerCase().includes(cTerm) || (c.phone && c.phone.includes(customerSearch))));
+  }, [customers, customerSearch]);
 
   const today = getTodayLocal();
 

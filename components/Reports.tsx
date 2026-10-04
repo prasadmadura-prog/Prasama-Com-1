@@ -735,11 +735,11 @@ const Reports: React.FC<ReportsProps> = ({
       const matchStartDate = !startDate || dateStr >= startDate;
       const matchEndDate = !endDate || dateStr <= endDate;
 
-      const q = searchQuery.toLowerCase();
+      const q = (searchQuery || '').toLowerCase();
       const matchSearch = !searchQuery || 
-        entry.refId.toLowerCase().includes(q) ||
-        entry.description.toLowerCase().includes(q) ||
-        entry.account.toLowerCase().includes(q);
+        (entry.refId || '').toLowerCase().includes(q) ||
+        (entry.description || '').toLowerCase().includes(q) ||
+        (entry.account || '').toLowerCase().includes(q);
 
       return matchAccount && matchBranch && matchStartDate && matchEndDate && matchSearch;
     });

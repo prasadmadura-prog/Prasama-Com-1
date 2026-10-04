@@ -805,10 +805,10 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
   const filteredFutureCheques = useMemo(() => {
     return futureCheques.filter(item => {
       const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
-      const q = searchQuery.toLowerCase();
+      const q = (searchQuery || '').toLowerCase();
       const matchesQuery = !q ||
-        item.chequeNumber.toLowerCase().includes(q) ||
-        item.payee.toLowerCase().includes(q) ||
+        (item.chequeNumber || '').toLowerCase().includes(q) ||
+        (item.payee || '').toLowerCase().includes(q) ||
         (item.notes && item.notes.toLowerCase().includes(q));
       return matchesStatus && matchesQuery;
     }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());

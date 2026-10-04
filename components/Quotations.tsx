@@ -34,10 +34,12 @@ const Quotations: React.FC<QuotationsProps> = ({
   const [validDays, setValidDays] = useState<number>(14);
 
   const filteredProducts = useMemo(() => {
-    if (!searchTerm.trim()) return products.slice(0, 10);
-    return products.filter(p =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+    const list = (products || []).filter(Boolean);
+    if (!searchTerm.trim()) return list.slice(0, 10);
+    const sTerm = searchTerm.toLowerCase();
+    return list.filter(p =>
+      (p.name || '').toLowerCase().includes(sTerm) ||
+      (p.sku || '').toLowerCase().includes(sTerm)
     ).slice(0, 10);
   }, [products, searchTerm]);
 
