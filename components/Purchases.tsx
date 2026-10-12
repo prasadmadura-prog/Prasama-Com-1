@@ -1962,7 +1962,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                             const discPct = Number(item.discountPercent !== undefined ? item.discountPercent : item.discount) || 0;
                             const discAmount = rawCost * (discPct / 100);
                             const totalCost = Math.max(0, rawCost - discAmount);
-                            const totalRetail = (Number(item.quantity) + (Number(item.freeQuantity) || 0)) * Number(product?.price || 0);
+                            const effectiveRetailPrice = item.sellingPrice !== undefined
+                              ? Number(item.sellingPrice)
+                              : (item.variantId
+                                  ? Number(product?.variants?.find(v => v.id === item.variantId)?.price ?? product?.price ?? 0)
+                                  : Number(product?.price ?? 0));
+                            const totalRetail = (Number(item.quantity) + (Number(item.freeQuantity) || 0)) * effectiveRetailPrice;
                             const profit = totalRetail - totalCost;
                             return (
                               <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
@@ -2049,7 +2054,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                                   <input
                                     type="number"
                                     step="0.01"
-                                    value={item.sellingPrice !== undefined ? item.sellingPrice : (item.variantId ? (product?.variants?.find(v => v.id === item.variantId)?.price ?? product?.price ?? 0) : (product?.price ?? 0))}
+                                    value={effectiveRetailPrice}
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'sellingPrice', e.target.value)}
                                     title="Edit Retail Selling Price for this size/batch"
@@ -2100,17 +2105,33 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">Potential Net Profit</p>
                             <p className="text-xl font-black text-emerald-700 font-mono">
                               Rs. {poItems.reduce((acc, item) => {
-                                const product = products.find(p => p.id === item.productId);
-                                if (!product) return acc;
+                                const product = products.find(p => p.id === item.productId) ||
+                                  products.find(p => p.sku === item.productId) ||
+                                  products.find(p => p.name?.toUpperCase().trim() === item.productId?.toString().toUpperCase().trim());
+                                const effectiveRetail = item.sellingPrice !== undefined
+                                  ? Number(item.sellingPrice)
+                                  : (item.variantId
+                                      ? Number(product?.variants?.find(v => v.id === item.variantId)?.price ?? product?.price ?? 0)
+                                      : Number(product?.price ?? 0));
                                 const totalQty = Number(item.quantity) + (Number(item.freeQuantity) || 0);
-                                return acc + (totalQty * Number(product.price || 0)) - (Number(item.quantity) * Number(item.cost));
+                                const rawCost = (Number(item.quantity) || 0) * (Number(item.cost) || 0);
+                                const discPct = Number(item.discountPercent !== undefined ? item.discountPercent : item.discount) || 0;
+                                const lineNetCost = Math.max(0, rawCost * (1 - discPct / 100));
+                                return acc + (totalQty * effectiveRetail) - lineNetCost;
                               }, 0).toLocaleString()}
                             </p>
                             <p className="text-[7px] font-bold text-emerald-600 uppercase tracking-wide mt-1">
                               AVG Margin: {totalAmount > 0 ? (((poItems.reduce((acc, item) => {
-                                const product = products.find(p => p.id === item.productId);
+                                const product = products.find(p => p.id === item.productId) ||
+                                  products.find(p => p.sku === item.productId) ||
+                                  products.find(p => p.name?.toUpperCase().trim() === item.productId?.toString().toUpperCase().trim());
+                                const effectiveRetail = item.sellingPrice !== undefined
+                                  ? Number(item.sellingPrice)
+                                  : (item.variantId
+                                      ? Number(product?.variants?.find(v => v.id === item.variantId)?.price ?? product?.price ?? 0)
+                                      : Number(product?.price ?? 0));
                                 const totalQty = Number(item.quantity) + (Number(item.freeQuantity) || 0);
-                                return acc + (totalQty * Number(product?.price || 0));
+                                return acc + (totalQty * effectiveRetail);
                               }, 0) - totalAmount) / totalAmount) * 100).toFixed(1) : 0}%
                             </p>
                           </div>
