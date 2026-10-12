@@ -147,7 +147,7 @@ const BarcodePrint: React.FC<BarcodePrintProps> = ({ products = [], categories =
   const filteredProducts = useMemo(() => {
     const sTerm = (searchTerm || '').toLowerCase();
     return (products || []).filter(p => {
-      if (!p) return false;
+      if (!p || p.isActive === false) return false;
       const matchesSearch = (p.name || "").toLowerCase().includes(sTerm) ||
         (p.sku || "").toLowerCase().includes(sTerm);
       const matchesCategory = filterCategoryId === 'All' || p.categoryId === filterCategoryId;

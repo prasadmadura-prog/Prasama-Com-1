@@ -169,7 +169,7 @@ const Purchases: React.FC<PurchasesProps> = ({
   const filteredPickerProducts = useMemo(() => {
     const sTerm = (productSearch || '').toLowerCase();
     return (sortedProducts || []).filter(p => {
-      if (!p) return false;
+      if (!p || p.isActive === false) return false;
       const matchesSearch = (p.name || '').toLowerCase().includes(sTerm) || (p.sku || '').toLowerCase().includes(sTerm);
       const matchesCat = selectedCatId === 'All' || p.categoryId === selectedCatId;
       return matchesSearch && matchesCat;

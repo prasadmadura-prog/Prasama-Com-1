@@ -84,7 +84,7 @@ const POS: React.FC<POSProps> = ({
     }
 
     // 2. Try exact ID match
-    let product = products.find(p => p.id === trimmed);
+    let product = products.find(p => p && p.isActive !== false && p.id === trimmed);
     let detectedBranch: string | null = null;
 
     // 3. If no exact match and term is longer than 3 characters, check for cashier suffix
@@ -165,7 +165,7 @@ const POS: React.FC<POSProps> = ({
     const sTerm = (search || '').toLowerCase();
     const bTerm = (baseSearch || '').toLowerCase();
     return (products || []).filter(p => {
-      if (!p) return false;
+      if (!p || p.isActive === false) return false;
       const matchesSearch = !sTerm.trim() ||
         (p.name || "").toLowerCase().includes(sTerm) ||
         (p.sku || "").toLowerCase().includes(sTerm) ||

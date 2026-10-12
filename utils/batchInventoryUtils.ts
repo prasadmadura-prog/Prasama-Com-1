@@ -187,9 +187,10 @@ export const findItemOrVariantByBarcode = (
   const cleanBarcode = (barcode || '').trim().toUpperCase();
   if (!cleanBarcode) return null;
 
+  const activeProducts = (products || []).filter(p => p && p.isActive !== false);
+
   // 1. Check size variants first
-  for (const prod of (products || [])) {
-    if (!prod) continue;
+  for (const prod of activeProducts) {
     if (prod.hasSizes && Array.isArray(prod.variants) && prod.variants.length > 0) {
       const matchedVariant = prod.variants.find(
         v => v && v.sku && v.sku.trim().toUpperCase() === cleanBarcode
@@ -201,8 +202,8 @@ export const findItemOrVariantByBarcode = (
   }
 
   // 2. Check main product barcode
-  const matchedProd = (products || []).find(
-    p => p && p.sku && p.sku.trim().toUpperCase() === cleanBarcode
+  const matchedProd = activeProducts.find(
+    p => p.sku && p.sku.trim().toUpperCase() === cleanBarcode
   );
   if (matchedProd) {
     return { product: matchedProd };

@@ -54,6 +54,7 @@ export interface Product {
   costingMethod?: 'FIFO' | 'WEIGHTED_AVG';
   reloadCommissionPercent?: number;
   reloadCostPercent?: number;
+  isActive?: boolean;
 }
 
 export interface Category {

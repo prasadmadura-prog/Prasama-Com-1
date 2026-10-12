@@ -35,6 +35,7 @@ const Inventory: React.FC<InventoryProps> = ({
   hasMore = false
 }) => {
   const [filterCategoryId, setFilterCategoryId] = useState<string>('All');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE' | 'DUPLICATES'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -54,7 +55,7 @@ const Inventory: React.FC<InventoryProps> = ({
   // Reset page when search or category filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterCategoryId]);
+  }, [searchTerm, filterCategoryId, statusFilter]);
 
   useEffect(() => {
     setCurrentCategoryPage(1);
@@ -67,6 +68,7 @@ const Inventory: React.FC<InventoryProps> = ({
   const [imageUrlValue, setImageUrlValue] = useState<string>('');
   const [branchStocksState, setBranchStocksState] = useState<Record<string, number>>({});
   const [selectedStoreForStock, setSelectedStoreForStock] = useState<string>('CASHIER 1');
+  const [isActiveState, setIsActiveState] = useState<boolean>(true);
 
   // Size Variations & Batch History State
   const [hasSizesState, setHasSizesState] = useState<boolean>(false);
@@ -175,6 +177,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setPriceValue(editingProduct.price || 0);
       setSkuValue(editingProduct.sku);
       setImageUrlValue(editingProduct.imageUrl || '');
+      setIsActiveState(editingProduct.isActive !== false);
       const initialStocks = editingProduct.branchStocks ? { ...editingProduct.branchStocks } : {
         'CASHIER 1': editingProduct.stock || 0,
         'CASHIER 2': 0,
@@ -192,6 +195,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setCostValue(0);
       setPriceValue(0);
       setImageUrlValue('');
+      setIsActiveState(true);
       setBranchStocksState({
         'CASHIER 1': 0,
         'CASHIER 2': 0,
@@ -362,6 +366,30 @@ const Inventory: React.FC<InventoryProps> = ({
     link.click();
   };
 
+  const duplicateProductIds = useMemo(() => {
+    const nameCounts = new Map<string, string[]>();
+    const skuCounts = new Map<string, string[]>();
+    (products || []).forEach(p => {
+      if (!p) return;
+      const n = (p.name || '').trim().toUpperCase();
+      const s = (p.sku || '').trim().toUpperCase();
+      if (n) {
+        nameCounts.set(n, [...(nameCounts.get(n) || []), p.id]);
+      }
+      if (s) {
+        skuCounts.set(s, [...(skuCounts.get(s) || []), p.id]);
+      }
+    });
+    const dupIds = new Set<string>();
+    nameCounts.forEach(ids => {
+      if (ids.length > 1) ids.forEach(id => dupIds.add(id));
+    });
+    skuCounts.forEach(ids => {
+      if (ids.length > 1) ids.forEach(id => dupIds.add(id));
+    });
+    return dupIds;
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
     return (products || [])
       .filter(p => {
@@ -375,10 +403,16 @@ const Inventory: React.FC<InventoryProps> = ({
         const branchStock = p.branchStocks ? (Number(p.branchStocks[selectedBranch]) || 0) : (Number(p.stock) || 0);
         const matchesBranch = selectedBranch === 'ALL CASHIERS' || branchStock > 0;
 
-        return matchesCategory && matchesSearch && matchesBranch;
+        const isItemActive = p.isActive !== false;
+        let matchesStatus = true;
+        if (statusFilter === 'ACTIVE') matchesStatus = isItemActive;
+        else if (statusFilter === 'INACTIVE') matchesStatus = !isItemActive;
+        else if (statusFilter === 'DUPLICATES') matchesStatus = duplicateProductIds.has(p.id);
+
+        return matchesCategory && matchesSearch && matchesBranch && matchesStatus;
       })
       .sort((a, b) => (a?.name || "").localeCompare(b?.name || ""));
-  }, [products, filterCategoryId, searchTerm, selectedBranch]);
+  }, [products, filterCategoryId, searchTerm, selectedBranch, statusFilter, duplicateProductIds]);
 
   const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
   const paginatedProducts = useMemo(() => {
@@ -443,7 +477,8 @@ const Inventory: React.FC<InventoryProps> = ({
       hasSizes: hasSizesState,
       variants: hasSizesState ? variantsState : undefined,
       batches: batchesState && batchesState.length > 0 ? batchesState : (editingProduct?.batches || []),
-      costingMethod: 'FIFO'
+      costingMethod: 'FIFO',
+      isActive: isActiveState
     };
 
     if (hasSizesState && variantsState.length > 0) {
@@ -605,6 +640,12 @@ const Inventory: React.FC<InventoryProps> = ({
               <option value="All">All Categories</option>
               {(categories || []).filter(c => c && c.id).map(cat => <option key={cat.id} value={cat.id}>{cat.name || 'Unnamed'}</option>)}
             </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE' | 'DUPLICATES')} className="px-8 py-4 rounded-[2rem] border border-slate-200 text-xs font-black uppercase bg-white cursor-pointer focus:border-indigo-500 transition-all">
+              <option value="ALL">ALL STATUS</option>
+              <option value="ACTIVE">✅ ACTIVE ONLY</option>
+              <option value="INACTIVE">🚫 INACTIVE ONLY</option>
+              <option value="DUPLICATES">⚠️ DUPLICATE ITEMS</option>
+            </select>
             <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="px-8 py-4 rounded-[2rem] border border-slate-200 text-xs font-black uppercase bg-white cursor-pointer focus:border-indigo-500 transition-all">
               <option value="ALL CASHIERS">ALL CASHIERS</option>
               {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4']).map(branch => (
@@ -683,8 +724,11 @@ const Inventory: React.FC<InventoryProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {paginatedProducts.map(p => (
-                  <tr key={p.id} className="hover:bg-indigo-50/30 transition-all group">
+                {paginatedProducts.map(p => {
+                  const isItemActive = p.isActive !== false;
+                  const isDuplicate = duplicateProductIds.has(p.id);
+                  return (
+                  <tr key={p.id} className={`hover:bg-indigo-50/30 transition-all group ${!isItemActive ? 'bg-slate-50/80 opacity-65' : ''}`}>
                     <td className="px-10 py-4">
                       <div className="flex items-center gap-3">
                         {p.imageUrl ? (
@@ -696,7 +740,17 @@ const Inventory: React.FC<InventoryProps> = ({
                         )}
                         <div>
                           <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <p className="font-black text-slate-900 text-[13px] uppercase tracking-tight leading-none">{p.name}</p>
+                            <p className={`font-black text-[13px] uppercase tracking-tight leading-none ${!isItemActive ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{p.name}</p>
+                            {!isItemActive && (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 font-black text-[8px] uppercase tracking-wider">
+                                🚫 INACTIVE
+                              </span>
+                            )}
+                            {isDuplicate && (
+                              <span className="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-200 text-amber-800 font-black text-[8px] uppercase tracking-wider" title="Another item has the same Name or SKU">
+                                ⚠️ DUPLICATE
+                              </span>
+                            )}
                             {p.hasSizes && p.variants && p.variants.length > 0 && (
                               <span className="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-[8px] uppercase tracking-wider">
                                 👕 {p.variants.length} SIZES ({p.variants.map(v => v.size).join(', ')})
@@ -775,13 +829,27 @@ const Inventory: React.FC<InventoryProps> = ({
                       </div>
                     </td>
                     <td className="px-10 py-4 text-center">
-                      <div className="flex justify-center gap-2">
+                      <div className="flex justify-center items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onUpsertProduct({ ...p, isActive: !isItemActive })}
+                          className={`px-3 h-9 rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all shadow-sm border ${
+                            isItemActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100'
+                          }`}
+                          title={isItemActive ? 'Click to Deactivate Item (Hide from POS)' : 'Click to Activate Item (Show in POS)'}
+                        >
+                          <span>{isItemActive ? '✅' : '🚫'}</span>
+                          <span>{isItemActive ? 'Active' : 'Inactive'}</span>
+                        </button>
                         <button onClick={() => { setEditingProduct(p); setIsModalOpen(true); }} className="w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center hover:text-indigo-600 hover:border-indigo-600 transition-all shadow-sm">✏️</button>
                         <button onClick={() => setIsDeletingId(p.id)} className="w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center hover:text-rose-600 hover:border-rose-600 transition-all shadow-sm">🗑️</button>
                       </div>
                     </td>
                   </tr >
-                ))}
+                  );
+                })}
                 {
                   paginatedProducts.length === 0 && (
                     <tr><td colSpan={5} className="py-40 text-center opacity-30 text-xs font-black uppercase tracking-[0.4em] italic">No Assets matched search criteria</td></tr>
@@ -896,7 +964,19 @@ const Inventory: React.FC<InventoryProps> = ({
                   </h3>
                   <p className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.4em] mt-2">Enterprise Master Synchronization</p>
                 </div>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsActiveState(prev => !prev)}
+                    className={`px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-sm flex items-center gap-1.5 border-2 ${
+                      isActiveState
+                        ? 'bg-emerald-500 text-white border-emerald-600 shadow-emerald-200'
+                        : 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100'
+                    }`}
+                  >
+                    <span>{isActiveState ? '✅' : '🚫'}</span>
+                    <span>{isActiveState ? 'ACTIVE' : 'INACTIVE'}</span>
+                  </button>
                   <button
                     onClick={closeModal}
                     className="w-12 h-12 shrink-0 flex items-center justify-center rounded-full bg-[#0f172a] text-white hover:bg-rose-600 transition-all text-xl shadow-xl active:scale-90"
@@ -1110,6 +1190,47 @@ const Inventory: React.FC<InventoryProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {/* ITEM STATUS (ACTIVE / INACTIVE) TOGGLE */}
+                  <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between ${isActiveState ? 'bg-emerald-50/70 border-emerald-200' : 'bg-rose-50/70 border-rose-200'}`}>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">{isActiveState ? '✅' : '🚫'}</span>
+                      <div>
+                        <h4 className={`text-[11px] font-black uppercase tracking-wide ${isActiveState ? 'text-emerald-900' : 'text-rose-900'}`}>
+                          Item Status: {isActiveState ? 'ACTIVE (Visible in POS & Sales)' : 'INACTIVE (Hidden from POS & Sales)'}
+                        </h4>
+                        <p className={`text-[8px] font-bold uppercase ${isActiveState ? 'text-emerald-600' : 'text-rose-500'}`}>
+                          {isActiveState
+                            ? 'This item is active and can be scanned/selected in POS, Quotations & POs'
+                            : 'This item is deactivated (useful for duplicate or discontinued items)'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsActiveState(true)}
+                        className={`px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all ${
+                          isActiveState
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-white text-slate-500 border border-slate-200 hover:bg-emerald-50 hover:text-emerald-700'
+                        }`}
+                      >
+                        Active
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsActiveState(false)}
+                        className={`px-3 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all ${
+                          !isActiveState
+                            ? 'bg-rose-600 text-white shadow-sm'
+                            : 'bg-white text-slate-500 border border-slate-200 hover:bg-rose-50 hover:text-rose-700'
+                        }`}
+                      >
+                        Inactive
+                      </button>
+                    </div>
+                  </div>
 
                   {/* SIZE VARIATIONS ACCORDION / TOGGLE */}
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
@@ -1537,17 +1658,37 @@ const Inventory: React.FC<InventoryProps> = ({
 
               <div className="p-10 overflow-y-auto custom-scrollbar space-y-4">
                 {products.filter(p => p.categoryId === viewingCategory.id).length > 0 ? (
-                  products.filter(p => p.categoryId === viewingCategory.id).map(p => (
-                    <div key={p.id} className="flex justify-between items-center bg-slate-50 p-6 rounded-3xl border border-slate-100 hover:border-indigo-200 transition-all group">
+                  products.filter(p => p.categoryId === viewingCategory.id).map(p => {
+                    const isItemActive = p.isActive !== false;
+                    return (
+                    <div key={p.id} className={`flex justify-between items-center p-6 rounded-3xl border transition-all group ${isItemActive ? 'bg-slate-50 border-slate-100 hover:border-indigo-200' : 'bg-rose-50/40 border-rose-100 opacity-70'}`}>
                       <div>
-                        <p className="font-black text-slate-900 text-sm uppercase leading-none mb-1">{p.name}</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className={`font-black text-sm uppercase leading-none ${isItemActive ? 'text-slate-900' : 'text-slate-400 line-through'}`}>{p.name}</p>
+                          {!isItemActive && (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-100 border border-rose-200 text-rose-700 font-black text-[8px] uppercase tracking-wider">
+                              🚫 INACTIVE
+                            </span>
+                          )}
+                        </div>
                         <p className="font-mono text-[10px] font-black text-slate-400">{p.sku}</p>
                       </div>
-                      <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-4">
                         <div className="text-right">
                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Stock</p>
                           <p className="font-mono text-sm font-black text-slate-900">{p.stock}</p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => onUpsertProduct({ ...p, isActive: !isItemActive })}
+                          className={`px-4 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-sm border ${
+                            isItemActive
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100'
+                          }`}
+                        >
+                          {isItemActive ? '✅ Active' : '🚫 Inactive'}
+                        </button>
                         <button
                           onClick={() => {
                             setViewingCategory(null);
@@ -1560,7 +1701,8 @@ const Inventory: React.FC<InventoryProps> = ({
                         </button>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="text-center py-20 opacity-40">
                     <p className="text-xs font-black uppercase tracking-widest">No products in this category</p>

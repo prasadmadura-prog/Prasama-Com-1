@@ -34,7 +34,7 @@ const Quotations: React.FC<QuotationsProps> = ({
   const [validDays, setValidDays] = useState<number>(14);
 
   const filteredProducts = useMemo(() => {
-    const list = (products || []).filter(Boolean);
+    const list = (products || []).filter(p => p && p.isActive !== false);
     if (!searchTerm.trim()) return list.slice(0, 10);
     const sTerm = searchTerm.toLowerCase();
     return list.filter(p =>
