@@ -1590,44 +1590,44 @@ const Purchases: React.FC<PurchasesProps> = ({
       {/* PO Terminal Modal */}
       {
         isPOModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
-            <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-[95vw] h-[90vh] overflow-hidden animate-in zoom-in duration-300 flex flex-col">
-              <div className="p-8 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-                <div>
-                  <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter leading-none">Inventory Intake Terminal</h3>
-                  <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2 italic">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-3 bg-slate-950/90 backdrop-blur-md">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-[98vw] h-[94vh] overflow-hidden animate-in zoom-in duration-300 flex flex-col">
+              <div className="px-6 py-3.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-4 flex-wrap">
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter leading-none">Inventory Intake Terminal</h3>
+                  <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest italic">
                     Ref: {selectedPO?.id || currentPOId || 'New Acquisition'}
                     {poSupplierInvoiceNo ? ` • Supplier Inv: ${poSupplierInvoiceNo}` : ''}
                   </p>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
                   {syncStatus === 'SAVING' && (
-                    <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50 rounded-xl">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 rounded-xl">
                       <div className="w-2 h-2 rounded-full bg-indigo-600 animate-ping"></div>
                       <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Syncing Draft...</span>
                     </div>
                   )}
                   {syncStatus === 'SYNCED' && (
-                    <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 rounded-xl">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-xl">
                       <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">✓ Draft Persistent</span>
                     </div>
                   )}
                   {selectedPO && (
-                    <button onClick={() => printPurchaseOrder(selectedPO)} className="px-6 py-2.5 rounded-xl border border-indigo-200 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 transition-all">🖨️ PDF Manifest</button>
+                    <button onClick={() => printPurchaseOrder(selectedPO)} className="px-4 py-1.5 rounded-xl border border-indigo-200 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 transition-all">🖨️ PDF Manifest</button>
                   )}
-                  <button onClick={closePOModal} className="text-slate-300 hover:text-slate-900 text-5xl leading-none transition-colors">&times;</button>
+                  <button onClick={closePOModal} className="text-slate-300 hover:text-slate-900 text-3xl leading-none transition-colors px-1">&times;</button>
                 </div>
               </div>
 
               <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
-                <div className="w-full lg:w-[400px] bg-slate-50/50 border-r border-slate-100 p-8 flex flex-col gap-6 overflow-hidden">
-                  <div className="space-y-4">
-                    <div className="flex flex-col gap-3">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Product Lookup & Search</label>
+                <div className="w-full lg:w-[290px] xl:w-[310px] bg-slate-50/50 border-r border-slate-100 p-4 flex flex-col gap-3 overflow-hidden shrink-0">
+                  <div className="space-y-2.5">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Product Lookup & Search</label>
                       <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
                         <input
-                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-xs font-bold outline-none focus:border-indigo-500 shadow-sm"
+                          className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-bold outline-none focus:border-indigo-500 shadow-sm"
                           placeholder="SEARCH ITEM FROM LIST..."
                           value={productSearch}
                           onChange={e => setProductSearch(e.target.value)}
@@ -1635,10 +1635,10 @@ const Purchases: React.FC<PurchasesProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-3">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Asset Type (Filter)</label>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Asset Type (Filter)</label>
                       <select
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-xs font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
                         value={selectedCatId}
                         onChange={e => setSelectedCatId(e.target.value)}
                       >
@@ -1648,16 +1648,16 @@ const Purchases: React.FC<PurchasesProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-1.5">
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-1.5">
                     {filteredPickerProducts.length > 0 ? filteredPickerProducts.map(p => (
                       <button
                         key={p.id}
                         onClick={() => handleAddItemToPO(p)}
-                        className="w-full text-left py-2 px-4 bg-white border border-slate-100 rounded-xl hover:border-indigo-500 hover:shadow-sm transition-all group flex justify-between items-center"
+                        className="w-full text-left py-2 px-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-500 hover:shadow-sm transition-all group flex justify-between items-center"
                       >
                         <div className="min-w-0">
                           <div className="flex flex-col">
-                            <p className="text-xs font-black text-slate-900 uppercase truncate leading-tight">
+                            <p className="text-[11px] font-black text-slate-900 uppercase truncate leading-tight">
                               {p.name}
                             </p>
                             <p className="text-[9px] font-bold text-indigo-500 uppercase truncate mt-0.5">
@@ -1666,7 +1666,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                           </div>
                           <p className="text-[9px] font-bold text-slate-400 font-mono mt-0.5">{p.sku} | STOCK: {p.stock} | BUY: Rs. {p.cost.toLocaleString()}</p>
                         </div>
-                        <span className="text-lg opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600">⊕</span>
+                        <span className="text-base opacity-0 group-hover:opacity-100 transition-opacity text-indigo-600 pl-1">⊕</span>
                       </button>
                     )) : (
                       <div className="py-20 text-center opacity-30">
@@ -1676,41 +1676,41 @@ const Purchases: React.FC<PurchasesProps> = ({
                   </div>
                 </div>
 
-                <div className="flex-1 flex flex-col p-8 overflow-y-auto custom-scrollbar">
-                  <div className="grid grid-cols-3 gap-6 mb-6 shrink-0">
-                    <div className="space-y-2">
-                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Entry Date</label>
+                <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar min-w-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5 mb-3 shrink-0 items-end">
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Entry Date</label>
                       <input
                         type="date"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500"
                         value={poDate}
                         onChange={e => setPoDate(e.target.value)}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center shrink-0">
-                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Supplier</label>
-                        <div className="flex gap-3">
+                    <div className="space-y-1 xl:col-span-2">
+                      <div className="flex justify-between items-center gap-1 shrink-0">
+                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Target Supplier</label>
+                        <div className="flex gap-2 shrink-0">
                           {vendorId && (
                             <button
                               type="button"
                               onClick={() => openVendorModal(vendors.find(v => v.id === vendorId))}
-                              className="text-[9px] font-black text-slate-500 hover:text-indigo-600 uppercase tracking-widest transition-colors flex items-center gap-1"
+                              className="text-[8px] font-black text-slate-500 hover:text-indigo-600 uppercase tracking-wider transition-colors flex items-center gap-0.5"
                             >
-                              <span>✎</span> EDIT INFO
+                              <span>✎</span> EDIT
                             </button>
                           )}
-                          <button type="button" onClick={() => openVendorModal()} className="text-[9px] font-black text-indigo-600 uppercase tracking-widest hover:underline">+ NEW SUPPLIER</button>
+                          <button type="button" onClick={() => openVendorModal()} className="text-[8px] font-black text-indigo-600 uppercase tracking-wider hover:underline">+ NEW</button>
                         </div>
                       </div>
-                      <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase">
+                      <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         <option value="" disabled>Select Vendor</option>
                         {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                       </select>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Settlement Pipeline</label>
-                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-black bg-white text-[10px] outline-none focus:border-indigo-500 uppercase tracking-widest">
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Settlement Pipeline</label>
+                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-black bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         <option value="BANK">Bank Transfer</option>
                         <option value="CASH">Cash Drawer</option>
                         <option value="CREDIT">Supplier Credit</option>
@@ -1718,21 +1718,21 @@ const Purchases: React.FC<PurchasesProps> = ({
                       </select>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Cashier</label>
-                      <select value={poBranchId} onChange={e => setPoBranchId(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase">
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Target Cashier</label>
+                      <select value={poBranchId} onChange={e => setPoBranchId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4', 'MAIN STORE']).map(b => (
                           <option key={b} value={b}>{b}</option>
                         ))}
                       </select>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Main Category</label>
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Main Category</label>
                       <input
                         list="po-main-cats"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase"
-                        placeholder="E.G. STOCK, ASSETS"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
+                        placeholder="E.G. STOCK"
                         value={poMainCategory}
                         onChange={e => setPoMainCategory(e.target.value)}
                       />
@@ -1743,12 +1743,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                         <option value="MARKETING MATERIAL" />
                       </datalist>
                     </div>
-                    <div className="space-y-2">
-                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Sub Category</label>
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Sub Category</label>
                       <input
                         list="po-sub-cats"
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase"
-                        placeholder="E.G. HARDWARE, STATIONERY"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
+                        placeholder="E.G. HARDWARE"
                         value={poCategory}
                         onChange={e => setPoCategory(e.target.value)}
                       />
@@ -1761,24 +1761,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                       </datalist>
                     </div>
 
-                    {(paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') && (
-                      <div className="space-y-2 animate-in slide-in-from-top-2">
-                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest">Source Account</label>
-                        <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 uppercase">
-                          {accounts.filter(a => a.id !== 'cash').map(a => (
-                            <option key={a.id} value={a.id}>{a.name} - (Rs. {Number(a.balance).toLocaleString()})</option>
-                          ))}
-                          {accounts.filter(a => a.id !== 'cash').length === 0 && <option value="" disabled>No Bank Accounts Found</option>}
-                        </select>
-                      </div>
-                    )}
-
-                    <div className="space-y-2 animate-in slide-in-from-top-2">
-                      <label className="block text-[9px] font-black text-indigo-600 uppercase tracking-widest">Supplier Invoice Number</label>
+                    <div className="space-y-1">
+                      <label className="block text-[8px] font-black text-indigo-600 uppercase tracking-wider truncate">Supplier Inv. No.</label>
                       <input
                         type="text"
-                        className="w-full px-4 py-3 rounded-xl border border-indigo-200 font-black font-mono bg-white text-xs outline-none focus:border-indigo-500 uppercase text-slate-900 placeholder:font-sans placeholder:font-bold placeholder:text-slate-300"
-                        placeholder="ENTER SUPPLIER INVOICE NO..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 font-black font-mono bg-white text-[11px] outline-none focus:border-indigo-500 uppercase text-slate-900 placeholder:font-sans placeholder:font-bold placeholder:text-slate-300"
+                        placeholder="INV NO..."
                         value={poSupplierInvoiceNo}
                         onChange={e => {
                           const newVal = e.target.value.toUpperCase();
@@ -1792,20 +1780,32 @@ const Purchases: React.FC<PurchasesProps> = ({
                         }}
                       />
                     </div>
-                  </div>
 
-                  <div className="space-y-2 mb-6 animate-in slide-in-from-top-2">
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Notes & Remarks</label>
-                    <textarea
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 font-bold bg-white text-xs outline-none focus:border-indigo-500 resize-none h-20 uppercase"
-                      placeholder="ADD OPTIONAL REMARKS OR DELIVERY INSTRUCTIONS..."
-                      value={poNotes}
-                      onChange={e => setPoNotes(e.target.value)}
-                    />
+                    {(paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') && (
+                      <div className="space-y-1 sm:col-span-2 animate-in slide-in-from-top-2">
+                        <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Source Account</label>
+                        <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
+                          {accounts.filter(a => a.id !== 'cash').map(a => (
+                            <option key={a.id} value={a.id}>{a.name} - (Rs. {Number(a.balance).toLocaleString()})</option>
+                          ))}
+                          {accounts.filter(a => a.id !== 'cash').length === 0 && <option value="" disabled>No Bank Accounts Found</option>}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className={`space-y-1 ${(paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') ? 'sm:col-span-2 xl:col-span-6' : 'sm:col-span-4 xl:col-span-8'}`}>
+                      <input
+                        type="text"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
+                        placeholder="NOTES & REMARKS (OPTIONAL DELIVERY INSTRUCTIONS)..."
+                        value={poNotes}
+                        onChange={e => setPoNotes(e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   {paymentMethod === 'CHEQUE' && (
-                    <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-4 mb-4 animate-in slide-in-from-top-2">
+                    <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-3 mb-3 animate-in slide-in-from-top-2">
                       <div className="flex justify-between items-center border-b border-indigo-100/80 pb-2 flex-wrap gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[9px] font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
@@ -1872,7 +1872,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <div className="space-y-1">
                               <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque No {index + 1}</label>
                               <input
-                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-black font-mono text-[10px] bg-white outline-none focus:border-indigo-500 uppercase"
+                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-black font-mono text-[10px] bg-white outline-none focus:border-indigo-500 uppercase"
                                 value={chq.number}
                                 onChange={(e) => handleChequeChange(index, 'number', e.target.value.toUpperCase())}
                                 placeholder={`CHQ-${String(index + 1).padStart(5, '0')}`}
@@ -1882,7 +1882,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                               <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Maturity Date {index + 1}</label>
                               <input
                                 type="date"
-                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold text-[10px] bg-white outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-bold text-[10px] bg-white outline-none focus:border-indigo-500"
                                 value={chq.date}
                                 onChange={(e) => handleChequeChange(index, 'date', e.target.value)}
                               />
@@ -1903,7 +1903,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                               <input
                                 type="number"
                                 step="0.01"
-                                className="w-full px-3 py-2 rounded-xl border border-slate-200 font-bold font-mono text-[10px] bg-white outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-bold font-mono text-[10px] bg-white outline-none focus:border-indigo-500"
                                 value={chq.amount}
                                 onChange={(e) => handleChequeChange(index, 'amount', e.target.value)}
                                 placeholder={(() => {
@@ -1934,23 +1934,23 @@ const Purchases: React.FC<PurchasesProps> = ({
                     </div>
                   )}
 
-                  <div className="flex-1 min-h-[400px] overflow-hidden border border-slate-100 rounded-[2rem] bg-slate-50/30 flex flex-col">
+                  <div className="flex-1 min-h-[320px] overflow-hidden border border-slate-100 rounded-2xl bg-slate-50/30 flex flex-col">
                     <div className="overflow-x-auto flex-1 custom-scrollbar">
                       <table className="w-full text-left border-collapse">
                         <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-100">
-                          <tr className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                            <th className="px-6 py-5 w-12 text-center">#</th>
-                            <th className="px-6 py-5">Asset Description</th>
-                            <th className="px-6 py-5">SKU</th>
-                            <th className="px-3 py-5 min-w-[130px]">Supplier Inv. No.</th>
-                            <th className="px-2 py-5 min-w-[100px] text-right">Unit Cost (Rs.)</th>
-                            <th className="px-2 py-5 min-w-[70px] text-center">Qty</th>
-                            <th className="px-2 py-5 min-w-[70px] text-center">Free Iss.</th>
-                            <th className="px-2 py-5 min-w-[90px] text-right">Disc. (%)</th>
-                            <th className="px-6 py-5 w-24 text-right">Retail</th>
-                            <th className="px-6 py-5 w-24 text-right">Est. Profit</th>
-                            <th className="px-6 py-5 w-32 text-right">Subtotal</th>
-                            <th className="px-6 py-5 w-16 text-center">Action</th>
+                          <tr className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                            <th className="px-2 py-2.5 w-7 text-center">#</th>
+                            <th className="px-2.5 py-2.5">Asset Description</th>
+                            <th className="px-2 py-2.5 w-24">SKU</th>
+                            <th className="px-1.5 py-2.5 w-24">Supplier Inv.</th>
+                            <th className="px-1.5 py-2.5 w-20 text-center">Unit Cost</th>
+                            <th className="px-1 py-2.5 w-14 text-center">Qty</th>
+                            <th className="px-1 py-2.5 w-14 text-center">Free</th>
+                            <th className="px-1 py-2.5 w-16 text-center">Disc %</th>
+                            <th className="px-1.5 py-2.5 w-20 text-center">Retail</th>
+                            <th className="px-2 py-2.5 w-20 text-right">Est. Profit</th>
+                            <th className="px-2.5 py-2.5 w-24 text-right">Subtotal</th>
+                            <th className="px-1.5 py-2.5 w-8 text-center"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white/50">
@@ -1971,59 +1971,59 @@ const Purchases: React.FC<PurchasesProps> = ({
                             const profit = totalRetail - totalCost;
                             return (
                               <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
-                                <td className="px-6 py-3 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
-                                <td className="px-6 py-3">
+                                <td className="px-2 py-2 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
+                                <td className="px-2.5 py-2">
                                   <div className="flex flex-col">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <p className="text-xs font-black text-slate-900 uppercase truncate max-w-[320px] leading-tight">
+                                      <p className="text-[11px] font-black text-slate-900 uppercase truncate max-w-[240px] leading-tight">
                                         {product?.name || item.productName || 'Unknown Asset'}
                                       </p>
                                       {item.size && (
-                                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-black text-[9px] uppercase tracking-wider">
+                                        <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-black text-[8px] uppercase tracking-wider">
                                           Size {item.size}
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-[10px] font-bold text-indigo-500 uppercase truncate max-w-[350px] mt-0.5">
+                                    <p className="text-[9px] font-bold text-indigo-500 uppercase truncate max-w-[240px] mt-0.5">
                                       {getVendorName(product?.vendorId)}
                                     </p>
                                   </div>
                                 </td>
-                                <td className="px-6 py-3">
-                                  <span className="text-[9px] font-black font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 uppercase tracking-tighter">
+                                <td className="px-2 py-2">
+                                  <span className="text-[9px] font-black font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 uppercase tracking-tighter">
                                     {product?.sku || item.productSku || 'N/A'}
                                   </span>
                                 </td>
-                                <td className="px-3 py-3">
+                                <td className="px-1.5 py-2">
                                   <input
                                     type="text"
                                     value={item.supplierInvoiceNumber !== undefined ? item.supplierInvoiceNumber : poSupplierInvoiceNo}
                                     placeholder={poSupplierInvoiceNo || "INV NO..."}
                                     onChange={e => updatePOItem(idx, 'supplierInvoiceNumber', e.target.value)}
-                                    className="w-full min-w-[120px] px-2.5 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-800 uppercase bg-white focus:border-indigo-500 transition-all outline-none"
+                                    className="w-24 px-2 py-1 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-800 uppercase bg-white focus:border-indigo-500 transition-all outline-none"
                                   />
                                 </td>
-                                <td className="px-2 py-3">
+                                <td className="px-1.5 py-2 text-center">
                                   <input
                                     type="number"
                                     step="0.001"
                                     value={item.cost}
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'cost', e.target.value)}
-                                    className="w-full min-w-[100px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-indigo-600 text-right bg-white focus:border-indigo-500 transition-all outline-none"
+                                    className="w-20 px-1.5 py-1 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-indigo-600 text-center bg-white focus:border-indigo-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                   />
                                 </td>
-                                <td className="px-2 py-3">
+                                <td className="px-1 py-2 text-center">
                                   <input
                                     type="number"
                                     step="0.001"
                                     value={item.quantity}
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'quantity', e.target.value)}
-                                    className="w-full min-w-[80px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-900 text-center bg-white focus:border-indigo-500 transition-all outline-none"
+                                    className="w-14 px-1 py-1 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-900 text-center bg-white focus:border-indigo-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                   />
                                 </td>
-                                <td className="px-2 py-3">
+                                <td className="px-1 py-2 text-center">
                                   <input
                                     type="number"
                                     step="1"
@@ -2031,11 +2031,11 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     value={item.freeQuantity !== undefined && item.freeQuantity !== null ? Math.round(Number(item.freeQuantity)) : 0}
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'freeQuantity', e.target.value)}
-                                    className="w-full min-w-[80px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-emerald-600 text-center bg-white focus:border-indigo-500 transition-all outline-none"
+                                    className="w-14 px-1 py-1 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-emerald-600 text-center bg-white focus:border-indigo-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                   />
                                 </td>
-                                <td className="px-2 py-3">
-                                  <div className="relative flex items-center">
+                                <td className="px-1 py-2 text-center">
+                                  <div className="relative inline-flex items-center">
                                     <input
                                       type="number"
                                       step="0.1"
@@ -2045,12 +2045,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                                       placeholder="0"
                                       onFocus={e => e.target.select()}
                                       onChange={e => updatePOItem(idx, 'discountPercent', e.target.value)}
-                                      className="w-full min-w-[75px] pr-5 px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-rose-600 text-right bg-white focus:border-rose-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      className="w-14 pr-4 pl-1.5 py-1 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-rose-600 text-center bg-white focus:border-rose-500 transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
-                                    <span className="absolute right-1.5 text-[10px] font-black text-rose-400 pointer-events-none">%</span>
+                                    <span className="absolute right-1.5 text-[9px] font-black text-rose-400 pointer-events-none">%</span>
                                   </div>
                                 </td>
-                                <td className="px-6 py-3 text-right">
+                                <td className="px-1.5 py-2 text-center">
                                   <input
                                     type="number"
                                     step="0.01"
@@ -2058,15 +2058,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'sellingPrice', e.target.value)}
                                     title="Edit Retail Selling Price for this size/batch"
-                                    className="w-24 px-2 py-1.5 rounded-lg border border-slate-200 font-bold font-mono text-[11px] text-slate-700 text-right bg-white focus:border-indigo-500 outline-none"
+                                    className="w-20 px-1.5 py-1 rounded-lg border border-slate-200 font-bold font-mono text-[11px] text-slate-700 text-center bg-white focus:border-indigo-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                   />
                                 </td>
-                                <td className="px-6 py-3 text-right">
+                                <td className="px-2 py-2 text-right whitespace-nowrap">
                                   <p className={`text-[10px] font-black font-mono ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {profit >= 0 ? '+' : ''}{profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </p>
                                 </td>
-                                <td className="px-6 py-3 text-right">
+                                <td className="px-2.5 py-2 text-right whitespace-nowrap">
                                   <p className="text-[11px] font-black font-mono text-slate-900">Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                                   {discPct > 0 && (
                                     <p className="text-[8px] font-bold text-rose-500 font-mono">
@@ -2074,15 +2074,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                                     </p>
                                   )}
                                 </td>
-                                <td className="px-6 py-3 text-center">
-                                  <button onClick={() => removePOItem(idx)} className="w-8 h-8 flex items-center justify-center text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">✕</button>
+                                <td className="px-1.5 py-2 text-center">
+                                  <button onClick={() => removePOItem(idx)} className="w-6 h-6 flex items-center justify-center text-rose-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all text-xs">✕</button>
                                 </td>
                               </tr>
                             );
                           })}
                           {poItems.length === 0 && (
                             <tr>
-                              <td colSpan={11} className="py-24 text-center">
+                              <td colSpan={12} className="py-20 text-center">
                                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em] italic leading-relaxed">
                                   MANIFEST VOID<br />
                                   <span className="tracking-widest opacity-50">Select items from catalog to initialize intake</span>
@@ -2095,15 +2095,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-6 mt-2 border-t border-slate-100 shrink-0">
-                    <div className="space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-3 mt-2 border-t border-slate-100 shrink-0">
+                    <div className="space-y-2.5">
                       {/* Potential Profit Calculation */}
                       {/* Summarized Key Metrics Header */}
-                      <div className="flex flex-col gap-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-                            <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-1">Potential Net Profit</p>
-                            <p className="text-xl font-black text-emerald-700 font-mono">
+                      <div className="flex flex-col gap-2.5">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
+                            <p className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mb-0.5">Potential Net Profit</p>
+                            <p className="text-base font-black text-emerald-700 font-mono">
                               Rs. {poItems.reduce((acc, item) => {
                                 const product = products.find(p => p.id === item.productId) ||
                                   products.find(p => p.sku === item.productId) ||
@@ -2120,7 +2120,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                                 return acc + (totalQty * effectiveRetail) - lineNetCost;
                               }, 0).toLocaleString()}
                             </p>
-                            <p className="text-[7px] font-bold text-emerald-600 uppercase tracking-wide mt-1">
+                            <p className="text-[7px] font-bold text-emerald-600 uppercase tracking-wide mt-0.5">
                               AVG Margin: {totalAmount > 0 ? (((poItems.reduce((acc, item) => {
                                 const product = products.find(p => p.id === item.productId) ||
                                   products.find(p => p.sku === item.productId) ||
@@ -2135,21 +2135,21 @@ const Purchases: React.FC<PurchasesProps> = ({
                               }, 0) - totalAmount) / totalAmount) * 100).toFixed(1) : 0}%
                             </p>
                           </div>
-                          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
-                            <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mb-1">Total Payload Items</p>
-                            <p className="text-xl font-black text-indigo-700 font-mono">{poItems.reduce((acc, item) => acc + Number(item.quantity) + (Number(item.freeQuantity) || 0), 0)} Units</p>
-                            <p className="text-[7px] font-bold text-indigo-600 uppercase tracking-wide mt-1">Across {poItems.length} Unique SKUs</p>
+                          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-2.5">
+                            <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest mb-0.5">Total Payload Items</p>
+                            <p className="text-base font-black text-indigo-700 font-mono">{poItems.reduce((acc, item) => acc + Number(item.quantity) + (Number(item.freeQuantity) || 0), 0)} Units</p>
+                            <p className="text-[7px] font-bold text-indigo-600 uppercase tracking-wide mt-0.5">Across {poItems.length} Unique SKUs</p>
                           </div>
                         </div>
                       </div>
                       <div className="flex justify-between items-end">
                         <div>
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Manifest Value</p>
-                          <p className="text-3xl font-black text-slate-900 font-mono tracking-tighter leading-none">Rs. {totalAmount.toLocaleString()}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Manifest Value</p>
+                          <p className="text-2xl font-black text-slate-900 font-mono tracking-tighter leading-none">Rs. {totalAmount.toLocaleString()}</p>
                         </div>
-                        <div className="flex gap-3">
-                          <button onClick={() => handleSavePO('DRAFT')} className="px-6 py-3 rounded-2xl border border-slate-200 font-black text-slate-400 uppercase tracking-widest text-[9px] hover:bg-slate-50 transition-all">Draft</button>
-                          <button onClick={() => handleSavePO()} className="px-8 py-3 rounded-2xl bg-slate-900 text-white font-black uppercase tracking-widest text-[9px] shadow-xl hover:bg-black transition-all active:scale-95">Commit PO</button>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleSavePO('DRAFT')} className="px-5 py-2.5 rounded-xl border border-slate-200 font-black text-slate-400 uppercase tracking-widest text-[9px] hover:bg-slate-50 transition-all">Draft</button>
+                          <button onClick={() => handleSavePO()} className="px-6 py-2.5 rounded-xl bg-slate-900 text-white font-black uppercase tracking-widest text-[9px] shadow-xl hover:bg-black transition-all active:scale-95">Commit PO</button>
                         </div>
                       </div>
                     </div>
