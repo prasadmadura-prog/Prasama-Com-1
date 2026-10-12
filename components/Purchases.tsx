@@ -1591,7 +1591,7 @@ const Purchases: React.FC<PurchasesProps> = ({
       {
         isPOModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-3 bg-slate-950/90 backdrop-blur-md">
-            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-[98vw] h-[94vh] overflow-hidden animate-in zoom-in duration-300 flex flex-col">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-[1220px] h-[94vh] overflow-hidden animate-in zoom-in duration-300 flex flex-col">
               <div className="px-6 py-3.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
                 <div className="flex items-center gap-4 flex-wrap">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter leading-none">Inventory Intake Terminal</h3>
@@ -1620,8 +1620,8 @@ const Purchases: React.FC<PurchasesProps> = ({
               </div>
 
               <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
-                <div className="w-full lg:w-[290px] xl:w-[310px] bg-slate-50/50 border-r border-slate-100 p-4 flex flex-col gap-3 overflow-hidden shrink-0">
-                  <div className="space-y-2.5">
+                <div className="w-full lg:w-[260px] bg-slate-50/50 border-r border-slate-100 p-3.5 flex flex-col gap-2.5 overflow-hidden shrink-0">
+                  <div className="space-y-2">
                     <div className="flex flex-col gap-1">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Product Lookup & Search</label>
                       <div className="relative">
@@ -1677,12 +1677,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                 </div>
 
                 <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar min-w-0">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5 mb-3 shrink-0 items-end">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 mb-2.5 shrink-0 items-end">
                     <div className="space-y-1">
                       <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Entry Date</label>
                       <input
                         type="date"
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500"
+                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500"
                         value={poDate}
                         onChange={e => setPoDate(e.target.value)}
                       />
@@ -1703,14 +1703,14 @@ const Purchases: React.FC<PurchasesProps> = ({
                           <button type="button" onClick={() => openVendorModal()} className="text-[8px] font-black text-indigo-600 uppercase tracking-wider hover:underline">+ NEW</button>
                         </div>
                       </div>
-                      <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
+                      <select value={vendorId} onChange={e => setVendorId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         <option value="" disabled>Select Vendor</option>
                         {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
                       <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Settlement Pipeline</label>
-                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-black bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
+                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-black bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         <option value="BANK">Bank Transfer</option>
                         <option value="CASH">Cash Drawer</option>
                         <option value="CREDIT">Supplier Credit</option>
@@ -1720,7 +1720,7 @@ const Purchases: React.FC<PurchasesProps> = ({
 
                     <div className="space-y-1">
                       <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Target Cashier</label>
-                      <select value={poBranchId} onChange={e => setPoBranchId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
+                      <select value={poBranchId} onChange={e => setPoBranchId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                         {(userProfile.allBranches || ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4', 'MAIN STORE']).map(b => (
                           <option key={b} value={b}>{b}</option>
                         ))}
@@ -1731,7 +1731,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                       <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Main Category</label>
                       <input
                         list="po-main-cats"
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
+                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
                         placeholder="E.G. STOCK"
                         value={poMainCategory}
                         onChange={e => setPoMainCategory(e.target.value)}
@@ -1747,7 +1747,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                       <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Sub Category</label>
                       <input
                         list="po-sub-cats"
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
+                        className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase"
                         placeholder="E.G. HARDWARE"
                         value={poCategory}
                         onChange={e => setPoCategory(e.target.value)}
@@ -1765,7 +1765,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                       <label className="block text-[8px] font-black text-indigo-600 uppercase tracking-wider truncate">Supplier Inv. No.</label>
                       <input
                         type="text"
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 font-black font-mono bg-white text-[11px] outline-none focus:border-indigo-500 uppercase text-slate-900 placeholder:font-sans placeholder:font-bold placeholder:text-slate-300"
+                        className="w-full px-2 py-1.5 rounded-lg border border-indigo-200 font-black font-mono bg-white text-[11px] outline-none focus:border-indigo-500 uppercase text-slate-900 placeholder:font-sans placeholder:font-bold placeholder:text-slate-300"
                         placeholder="INV NO..."
                         value={poSupplierInvoiceNo}
                         onChange={e => {
@@ -1784,7 +1784,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                     {(paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') && (
                       <div className="space-y-1 sm:col-span-2 animate-in slide-in-from-top-2">
                         <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider truncate">Source Account</label>
-                        <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
+                        <select value={accountId} onChange={e => setAccountId(e.target.value)} className="w-full px-2 py-1.5 rounded-lg border border-slate-200 font-bold bg-white text-[11px] outline-none focus:border-indigo-500 uppercase">
                           {accounts.filter(a => a.id !== 'cash').map(a => (
                             <option key={a.id} value={a.id}>{a.name} - (Rs. {Number(a.balance).toLocaleString()})</option>
                           ))}
@@ -1805,13 +1805,13 @@ const Purchases: React.FC<PurchasesProps> = ({
                   </div>
 
                   {paymentMethod === 'CHEQUE' && (
-                    <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-3 mb-3 animate-in slide-in-from-top-2">
-                      <div className="flex justify-between items-center border-b border-indigo-100/80 pb-2 flex-wrap gap-2">
+                    <div className="p-2.5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2 mb-2.5 animate-in slide-in-from-top-2">
+                      <div className="flex justify-between items-center border-b border-indigo-100/80 pb-1.5 flex-wrap gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[9px] font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
-                            <span>💳</span> CHEQUE PAYMENT DETAILS ({chequesList.length} {chequesList.length === 1 ? 'CHEQUE' : 'CHEQUES'})
+                          <span className="text-[9px] font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1">
+                            <span>💳</span> CHEQUE PAYMENT ({chequesList.length})
                           </span>
-                          <span className="text-[9px] font-black text-indigo-600 bg-indigo-100 px-2.5 py-0.5 rounded-full font-mono">
+                          <span className="text-[9px] font-black text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full font-mono">
                             Allocated: Rs. {chequesList.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / Rs. {Number(totalAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                           {(() => {
@@ -1819,14 +1819,14 @@ const Purchases: React.FC<PurchasesProps> = ({
                             const diff = Math.round((Number(totalAmount) - alloc) * 100) / 100;
                             if (Math.abs(diff) < 0.01) {
                               return (
-                                <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full font-mono">
+                                <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-mono">
                                   ✅ Fully Balanced
                                 </span>
                               );
                             }
                             return (
                               <div className="flex items-center gap-1.5">
-                                <span className={`text-[9px] font-black px-2.5 py-0.5 rounded-full font-mono ${diff > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full font-mono ${diff > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
                                   {diff > 0 ? `Unallocated: Rs. ${diff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `Over: Rs. ${Math.abs(diff).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                 </span>
                                 <button
@@ -1844,93 +1844,78 @@ const Purchases: React.FC<PurchasesProps> = ({
                         <button
                           type="button"
                           onClick={handleAddCheque}
-                          className="text-[9px] font-black uppercase tracking-widest px-3 py-1 bg-indigo-600 border border-indigo-600 rounded-lg text-white hover:bg-indigo-700 transition-all shadow-sm flex items-center gap-1 active:scale-95"
+                          className="text-[8px] font-black uppercase tracking-widest px-2.5 py-1 bg-indigo-600 border border-indigo-600 rounded-lg text-white hover:bg-indigo-700 transition-all shadow-sm flex items-center gap-1 active:scale-95"
                         >
-                          <span>+ Add Another Cheque</span>
+                          <span>+ Add Cheque</span>
                         </button>
                       </div>
 
-                      {chequesList.map((chq, index) => (
-                        <div key={index} className={`space-y-2 ${index > 0 ? 'pt-3 border-t border-indigo-100/60 animate-in slide-in-from-top-1' : ''}`}>
-                          <div className="flex justify-between items-center">
-                            <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1.5">
-                              <span className="w-4 h-4 bg-indigo-200 text-indigo-800 rounded-full text-[8px] flex items-center justify-center font-bold">{index + 1}</span>
-                              Cheque {index + 1} Details {index === 0 ? '' : `(Secondary #${index + 1})`}
-                            </p>
+                      <div className="space-y-1.5">
+                        {chequesList.map((chq, index) => (
+                          <div key={index} className="flex items-end gap-2">
+                            <span className="w-5 h-7 bg-indigo-200 text-indigo-800 rounded-lg text-[9px] flex items-center justify-center font-black shrink-0">{index + 1}</span>
+                            <div className="flex-1 grid grid-cols-3 gap-2">
+                              <div className="space-y-0.5">
+                                <label className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Cheque No {index + 1}</label>
+                                <input
+                                  className="w-full px-2.5 py-1 rounded-lg border border-slate-200 font-black font-mono text-[10px] bg-white outline-none focus:border-indigo-500 uppercase"
+                                  value={chq.number}
+                                  onChange={(e) => handleChequeChange(index, 'number', e.target.value.toUpperCase())}
+                                  placeholder={`CHQ-${String(index + 1).padStart(5, '0')}`}
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <label className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Maturity Date {index + 1}</label>
+                                <input
+                                  type="date"
+                                  className="w-full px-2.5 py-1 rounded-lg border border-slate-200 font-bold text-[10px] bg-white outline-none focus:border-indigo-500"
+                                  value={chq.date}
+                                  onChange={(e) => handleChequeChange(index, 'date', e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between items-center">
+                                  <label className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Cheque {index + 1} Amt (Rs)</label>
+                                  {index === chequesList.length - 1 && chequesList.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={handleAutoFillFinalCheque}
+                                      className="text-[7px] font-black text-amber-600 hover:text-amber-800 underline uppercase"
+                                    >
+                                      Auto-Balance
+                                    </button>
+                                  )}
+                                </div>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="w-full px-2.5 py-1 rounded-lg border border-slate-200 font-bold font-mono text-[10px] bg-white outline-none focus:border-indigo-500"
+                                  value={chq.amount}
+                                  onChange={(e) => handleChequeChange(index, 'amount', e.target.value)}
+                                  placeholder={(() => {
+                                    if (index === chequesList.length - 1) {
+                                      const otherSum = chequesList.slice(0, index).reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+                                      const rem = Math.max(0, Math.round((Number(totalAmount) - otherSum) * 100) / 100);
+                                      return rem > 0 ? rem.toFixed(2) : "0.00";
+                                    }
+                                    return "Optional";
+                                  })()}
+                                />
+                              </div>
+                            </div>
                             {chequesList.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => handleRemoveCheque(index)}
-                                className="text-[8px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-700 hover:bg-rose-50 px-2 py-0.5 rounded transition-all"
+                                className="h-7 px-2 text-[9px] font-black uppercase text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all shrink-0"
+                                title={`Remove Cheque ${index + 1}`}
                               >
-                                ✕ Remove Cheque {index + 1}
+                                ✕
                               </button>
                             )}
                           </div>
-                          
-                          <div className="grid grid-cols-3 gap-3">
-                            <div className="space-y-1">
-                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque No {index + 1}</label>
-                              <input
-                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-black font-mono text-[10px] bg-white outline-none focus:border-indigo-500 uppercase"
-                                value={chq.number}
-                                onChange={(e) => handleChequeChange(index, 'number', e.target.value.toUpperCase())}
-                                placeholder={`CHQ-${String(index + 1).padStart(5, '0')}`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Maturity Date {index + 1}</label>
-                              <input
-                                type="date"
-                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-bold text-[10px] bg-white outline-none focus:border-indigo-500"
-                                value={chq.date}
-                                onChange={(e) => handleChequeChange(index, 'date', e.target.value)}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Cheque {index + 1} Amt (Rs)</label>
-                                {index === chequesList.length - 1 && chequesList.length > 1 && (
-                                  <button
-                                    type="button"
-                                    onClick={handleAutoFillFinalCheque}
-                                    className="text-[7px] font-black text-amber-600 hover:text-amber-800 underline uppercase"
-                                  >
-                                    Auto-Balance
-                                  </button>
-                                )}
-                              </div>
-                              <input
-                                type="number"
-                                step="0.01"
-                                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 font-bold font-mono text-[10px] bg-white outline-none focus:border-indigo-500"
-                                value={chq.amount}
-                                onChange={(e) => handleChequeChange(index, 'amount', e.target.value)}
-                                placeholder={(() => {
-                                  if (index === chequesList.length - 1) {
-                                    const otherSum = chequesList.slice(0, index).reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
-                                    const rem = Math.max(0, Math.round((Number(totalAmount) - otherSum) * 100) / 100);
-                                    return rem > 0 ? rem.toFixed(2) : "0.00";
-                                  }
-                                  return "Optional";
-                                })()}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-
-                      {chequesList.length > 1 && (
-                        <div className="pt-1 flex justify-center">
-                          <button
-                            type="button"
-                            onClick={handleAddCheque}
-                            className="text-[9px] font-black uppercase tracking-widest px-4 py-1.5 bg-white border border-indigo-200 rounded-xl text-indigo-600 hover:bg-indigo-50 transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
-                          >
-                            <span>+ Add Cheque #{chequesList.length + 1}</span>
-                          </button>
-                        </div>
-                      )}
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -1939,9 +1924,9 @@ const Purchases: React.FC<PurchasesProps> = ({
                       <table className="w-full text-left border-collapse">
                         <thead className="sticky top-0 z-20 bg-slate-50 border-b border-slate-100">
                           <tr className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                            <th className="px-2 py-2.5 w-7 text-center">#</th>
-                            <th className="px-2.5 py-2.5">Asset Description</th>
-                            <th className="px-2 py-2.5 w-24">SKU</th>
+                            <th className="px-1.5 py-2.5 w-7 text-center">#</th>
+                            <th className="px-2 py-2.5 w-52 max-w-[210px]">Asset Description</th>
+                            <th className="px-1.5 py-2.5 w-24">SKU</th>
                             <th className="px-1.5 py-2.5 w-24">Supplier Inv.</th>
                             <th className="px-1.5 py-2.5 w-20 text-center">Unit Cost</th>
                             <th className="px-1 py-2.5 w-14 text-center">Qty</th>
@@ -1949,8 +1934,8 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <th className="px-1 py-2.5 w-16 text-center">Disc %</th>
                             <th className="px-1.5 py-2.5 w-20 text-center">Retail</th>
                             <th className="px-2 py-2.5 w-20 text-right">Est. Profit</th>
-                            <th className="px-2.5 py-2.5 w-24 text-right">Subtotal</th>
-                            <th className="px-1.5 py-2.5 w-8 text-center"></th>
+                            <th className="px-2 py-2.5 w-24 text-right">Subtotal</th>
+                            <th className="px-1 py-2.5 w-7 text-center"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white/50">
@@ -1971,11 +1956,11 @@ const Purchases: React.FC<PurchasesProps> = ({
                             const profit = totalRetail - totalCost;
                             return (
                               <tr key={idx} className="hover:bg-indigo-50/30 transition-colors group">
-                                <td className="px-2 py-2 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
-                                <td className="px-2.5 py-2">
+                                <td className="px-1.5 py-2 text-[10px] font-black text-slate-300 text-center">{idx + 1}</td>
+                                <td className="px-2 py-2 w-52 max-w-[210px]">
                                   <div className="flex flex-col">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <p className="text-[11px] font-black text-slate-900 uppercase truncate max-w-[240px] leading-tight">
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <p className="text-[11px] font-black text-slate-900 uppercase truncate max-w-[200px] leading-tight">
                                         {product?.name || item.productName || 'Unknown Asset'}
                                       </p>
                                       {item.size && (
@@ -1984,12 +1969,12 @@ const Purchases: React.FC<PurchasesProps> = ({
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-[9px] font-bold text-indigo-500 uppercase truncate max-w-[240px] mt-0.5">
+                                    <p className="text-[9px] font-bold text-indigo-500 uppercase truncate max-w-[200px] mt-0.5">
                                       {getVendorName(product?.vendorId)}
                                     </p>
                                   </div>
                                 </td>
-                                <td className="px-2 py-2">
+                                <td className="px-1.5 py-2">
                                   <span className="text-[9px] font-black font-mono text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 uppercase tracking-tighter">
                                     {product?.sku || item.productSku || 'N/A'}
                                   </span>
