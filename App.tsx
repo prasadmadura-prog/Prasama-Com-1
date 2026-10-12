@@ -1047,7 +1047,7 @@ const App: React.FC = () => {
       accountId: (po.paymentMethod === 'BANK' || po.paymentMethod === 'CARD' || po.paymentMethod === 'CHEQUE') ? po.accountId : (po.paymentMethod === 'CASH' ? 'cash' : null),
       vendorId: po.vendorId,
       branchId: activeBranch,
-      description: `Stock Received against PO: ${po.id}`,
+      description: `Stock Received against PO: ${po.id}${po.supplierInvoiceNumber ? ` (Supplier Inv: ${po.supplierInvoiceNumber})` : ''}`,
       chequeNumber: po.chequeNumber,
       chequeDate: po.chequeDate,
       chequeNumber2: po.chequeNumber2,

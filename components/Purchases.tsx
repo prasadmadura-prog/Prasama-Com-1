@@ -78,6 +78,7 @@ const Purchases: React.FC<PurchasesProps> = ({
     });
   };
   const [poDate, setPoDate] = useState(new Date().toISOString().split('T')[0]);
+  const [poSupplierInvoiceNo, setPoSupplierInvoiceNo] = useState('');
   const [poNotes, setPoNotes] = useState('');
   const [poItems, setPoItems] = useState<PurchaseOrderItem[]>([]);
   const [poMainCategory, setPoMainCategory] = useState('');
@@ -143,6 +144,15 @@ const Purchases: React.FC<PurchasesProps> = ({
     return v ? v.name : 'UNKNOWN VENDOR';
   };
 
+  const getPOSupplierInvoiceNo = (po?: PurchaseOrder | null) => {
+    if (!po) return '';
+    if (po.supplierInvoiceNumber && po.supplierInvoiceNumber.trim()) {
+      return po.supplierInvoiceNumber.trim();
+    }
+    const itemWithInv = (po.items || []).find(i => i.supplierInvoiceNumber && i.supplierInvoiceNumber.trim());
+    return itemWithInv?.supplierInvoiceNumber?.trim() || '';
+  };
+
   const sortedProducts = useMemo(() => {
     return [...(products || [])].filter(Boolean).sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
   }, [products]);
@@ -154,7 +164,8 @@ const Purchases: React.FC<PurchasesProps> = ({
       const q = (poSearch || '').toLowerCase();
       list = list.filter(po => {
         const vName = (getVendorName(po.vendorId) || '').toLowerCase();
-        return (po.id || '').toLowerCase().includes(q) || vName.includes(q);
+        const supInv = getPOSupplierInvoiceNo(po).toLowerCase();
+        return (po.id || '').toLowerCase().includes(q) || vName.includes(q) || supInv.includes(q);
       });
     }
     return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -221,12 +232,15 @@ const Purchases: React.FC<PurchasesProps> = ({
 
     autoSaveTimerRef.current = window.setTimeout(() => {
       const currentPOStatus = selectedPO?.status || 'DRAFT';
+      const trimmedSupInv = poSupplierInvoiceNo.trim().toUpperCase() || poItems.find(i => i.supplierInvoiceNumber?.trim())?.supplierInvoiceNumber?.trim().toUpperCase() || '';
       onUpsertPO({
         id: currentPOId,
+        supplierInvoiceNumber: trimmedSupInv,
         date: new Date(poDate).toISOString(),
         vendorId,
         items: poItems.map(item => {
           const sanitizedFreeQty = Math.round(Number(item.freeQuantity) || 0);
+          const itemSupInv = (item.supplierInvoiceNumber || trimmedSupInv || '').trim().toUpperCase();
           // If metadata is missing, try to find it now to persist it
           if (!item.productName || !item.productSku) {
             const p = products.find(p => p.id === item.productId) ||
@@ -237,12 +251,14 @@ const Purchases: React.FC<PurchasesProps> = ({
                 ...item,
                 productName: p.name,
                 productSku: p.sku,
+                supplierInvoiceNumber: itemSupInv,
                 freeQuantity: sanitizedFreeQty
               };
             }
           }
           return {
             ...item,
+            supplierInvoiceNumber: itemSupInv,
             freeQuantity: sanitizedFreeQty
           };
         }),
@@ -308,7 +324,7 @@ const Purchases: React.FC<PurchasesProps> = ({
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [poItems, vendorId, poDate, paymentMethod, accountId, chequesList, poNotes, isPOModalOpen, currentPOId, selectedPO]);
+  }, [poItems, vendorId, poDate, poSupplierInvoiceNo, paymentMethod, accountId, chequesList, poNotes, isPOModalOpen, currentPOId, selectedPO]);
 
   // Financial tracking for current PO
   const poFinancials = useMemo(() => {
@@ -452,6 +468,7 @@ const Purchases: React.FC<PurchasesProps> = ({
         productId: product.id,
         productName: variant ? `${product.name} [${variant.size}]` : product.name,
         productSku: variant?.sku || product.sku,
+        supplierInvoiceNumber: poSupplierInvoiceNo.trim().toUpperCase(),
         quantity: 1,
         freeQuantity: 0,
         cost: initialCost,
@@ -473,6 +490,18 @@ const Purchases: React.FC<PurchasesProps> = ({
   };
 
   const updatePOItem = (index: number, field: keyof PurchaseOrderItem, value: string | number) => {
+    if (field === 'supplierInvoiceNumber') {
+      const strVal = String(value).toUpperCase();
+      setPoItems(prev => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], supplierInvoiceNumber: strVal };
+        return updated;
+      });
+      if (!poSupplierInvoiceNo.trim() && strVal.trim()) {
+        setPoSupplierInvoiceNo(strVal.trim());
+      }
+      return;
+    }
     setPoItems(prev => {
       const updated = [...prev];
       let numVal = isNaN(parseFloat(String(value))) ? 0 : parseFloat(String(value));
@@ -515,10 +544,13 @@ const Purchases: React.FC<PurchasesProps> = ({
     // Default to 'PENDING' for new or draft commits.
     const targetStatus: POStatus = status || (selectedPO?.status === 'RECEIVED' ? 'RECEIVED' : 'PENDING');
 
+    const finalSupplierInvoiceNo = poSupplierInvoiceNo.trim().toUpperCase() || poItems.find(i => i.supplierInvoiceNumber?.trim())?.supplierInvoiceNumber?.trim().toUpperCase() || '';
+
     try {
       setSyncStatus('SAVING');
       await onUpsertPO({
         id: finalId,
+        supplierInvoiceNumber: finalSupplierInvoiceNo,
         date: safeDate,
         vendorId,
         items: poItems.map(i => {
@@ -533,6 +565,7 @@ const Purchases: React.FC<PurchasesProps> = ({
             productId: i.productId,
             productName: (product?.name ? (i.size ? `${product.name} [${i.size}]` : product.name) : i.productName) || 'Unknown Item',
             productSku: i.productSku || product?.sku || 'N/A',
+            supplierInvoiceNumber: (i.supplierInvoiceNumber || finalSupplierInvoiceNo || '').trim().toUpperCase(),
             quantity: Number(i.quantity) || 0,
             freeQuantity: Math.round(Number(i.freeQuantity) || 0),
             cost: Number(i.cost) || 0,
@@ -650,10 +683,13 @@ const Purchases: React.FC<PurchasesProps> = ({
         setChequesList([{ number: '', date: new Date().toISOString().split('T')[0], amount: '' }]);
       }
 
+      const initialSupInv = getPOSupplierInvoiceNo(po);
       setPoDate(po.date.split('T')[0]);
+      setPoSupplierInvoiceNo(initialSupInv);
       setPoNotes(po.notes || '');
       setPoItems((po.items || []).map(item => ({
         ...item,
+        supplierInvoiceNumber: item.supplierInvoiceNumber || initialSupInv || '',
         freeQuantity: item.freeQuantity !== undefined ? Math.round(Number(item.freeQuantity) || 0) : 0
       })));
       setPoMainCategory(po.mainCategory || '');
@@ -667,6 +703,7 @@ const Purchases: React.FC<PurchasesProps> = ({
       setAccountId(accounts.find(a => a.id !== 'cash')?.id || 'cash');
       setChequesList([{ number: '', date: new Date().toISOString().split('T')[0], amount: '' }]);
       setPoDate(new Date().toISOString().split('T')[0]);
+      setPoSupplierInvoiceNo('');
       setPoNotes('');
       setPoItems([]);
       setPoMainCategory('');
@@ -915,6 +952,7 @@ const Purchases: React.FC<PurchasesProps> = ({
               <h1 class="title">Purchase Order</h1>
               <div class="meta-bar">
                 <h4>Ref: ${po.id}</h4>
+                ${getPOSupplierInvoiceNo(po) ? `<p style="color: #4f46e5;">SUPPLIER INVOICE NO: ${getPOSupplierInvoiceNo(po)}</p>` : ''}
                 <p>STATUS: ${po.status}</p>
               </div>
             </div>
@@ -930,6 +968,7 @@ const Purchases: React.FC<PurchasesProps> = ({
               <h5>Supplier Details</h5>
               <h3>${vendor?.name || 'N/A'}</h3>
               <p>PH: ${vendor?.phone || 'N/A'}</p>
+              ${getPOSupplierInvoiceNo(po) ? `<p style="color: #0f172a; font-weight: 900;">SUPPLIER INV #: ${getPOSupplierInvoiceNo(po)}</p>` : ''}
             </div>
             <div class="box" style="text-align: right;">
               <h5>Settlement Pipeline</h5>
@@ -1100,7 +1139,7 @@ const Purchases: React.FC<PurchasesProps> = ({
               <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
               <input
                 type="text"
-                placeholder="SEARCH INVOICE OR VENDOR..."
+                placeholder="SEARCH PO, SUPPLIER INVOICE NO, OR VENDOR..."
                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border-none rounded-2xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-indigo-600/20 transition-all placeholder:text-slate-300"
                 value={poSearch}
                 onChange={(e) => setPoSearch(e.target.value)}
@@ -1122,6 +1161,7 @@ const Purchases: React.FC<PurchasesProps> = ({
               <thead className="bg-slate-50 text-slate-400">
                 <tr>
                   <th className="px-8 py-5 font-black uppercase tracking-widest text-[10px]">PO Reference</th>
+                  <th className="px-6 py-5 font-black uppercase tracking-widest text-[10px]">Supplier Invoice No.</th>
                   <th className="px-8 py-5 font-black uppercase tracking-widest text-[10px]">Vendor</th>
                   <th className="px-8 py-5 font-black uppercase tracking-widest text-[10px] text-right">Value (Rs.)</th>
                   <th className="px-8 py-5 font-black uppercase tracking-widest text-[10px]">Method</th>
@@ -1131,11 +1171,22 @@ const Purchases: React.FC<PurchasesProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {/* Use paginatedPOs instead of filteredPOs */}
-                {(paginatedPOs || []).map(po => (
+                {(paginatedPOs || []).map(po => {
+                  const supInvNo = getPOSupplierInvoiceNo(po);
+                  return (
                   <tr key={po.id} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-8 py-5">
                       <p className="font-black text-slate-900 text-[10px] opacity-40 uppercase tracking-tighter mb-1">{po.date.split('T')[0]}</p>
                       <p className="font-mono font-black text-indigo-600 underline cursor-pointer" onClick={() => openPOModal(po)}>{po.id}</p>
+                    </td>
+                    <td className="px-6 py-5">
+                      {supInvNo ? (
+                        <span className="font-mono font-black text-xs text-slate-800 bg-indigo-50/70 border border-indigo-100 px-3 py-1 rounded-lg uppercase tracking-wider">
+                          {supInvNo}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-300 uppercase italic">—</span>
+                      )}
                     </td>
                     <td className="px-8 py-5">
                       <button
@@ -1171,10 +1222,11 @@ const Purchases: React.FC<PurchasesProps> = ({
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(!paginatedPOs || paginatedPOs.length === 0) && (
                   <tr>
-                    <td colSpan={6} className="px-8 py-20 text-center text-slate-300 font-black uppercase tracking-[0.4em] text-[10px] italic">{poSearch ? 'No matching invoices found' : 'No Purchase Orders Found'}</td>
+                    <td colSpan={7} className="px-8 py-20 text-center text-slate-300 font-black uppercase tracking-[0.4em] text-[10px] italic">{poSearch ? 'No matching invoices found' : 'No Purchase Orders Found'}</td>
                   </tr>
                 )}
               </tbody>
@@ -1430,24 +1482,31 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <p className="text-slate-900 font-black text-xs uppercase">{item.date.split('T')[0]}</p>
                           </td>
                           <td className="px-6 py-5">
-                            <button
-                              onClick={() => {
-                                if (item.ledgerType === 'PO') printPurchaseOrder(item);
-                                else {
-                                  const poRef = item.description?.toUpperCase().match(/PO-\d+/)?.[0];
-                                  const po = purchaseOrders.find(p => p.id === poRef);
-                                  if (po) printPurchaseOrder(po);
-                                  else alert("Invoice manifest only available for PO-linked transactions.");
-                                }
-                              }}
-                              className="font-mono text-[10px] font-black bg-slate-900 text-white px-3 py-1.5 rounded-lg tracking-widest uppercase hover:bg-indigo-600 transition-colors"
-                            >
-                              {item.id}
-                            </button>
+                            <div className="flex flex-col items-start gap-1">
+                              <button
+                                onClick={() => {
+                                  if (item.ledgerType === 'PO') printPurchaseOrder(item);
+                                  else {
+                                    const poRef = item.description?.toUpperCase().match(/PO-\d+/)?.[0];
+                                    const po = purchaseOrders.find(p => p.id === poRef);
+                                    if (po) printPurchaseOrder(po);
+                                    else alert("Invoice manifest only available for PO-linked transactions.");
+                                  }
+                                }}
+                                className="font-mono text-[10px] font-black bg-slate-900 text-white px-3 py-1.5 rounded-lg tracking-widest uppercase hover:bg-indigo-600 transition-colors"
+                              >
+                                {item.id}
+                              </button>
+                              {item.ledgerType === 'PO' && getPOSupplierInvoiceNo(item) && (
+                                <span className="font-mono text-[9px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100 uppercase">
+                                  INV: {getPOSupplierInvoiceNo(item)}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-5">
                             <p className="text-slate-500 text-[11px] font-bold uppercase italic max-w-xs truncate">
-                              {item.ledgerType === 'PO' ? `Purchase Commitment` : item.description}
+                              {item.ledgerType === 'PO' ? `Purchase Commitment${getPOSupplierInvoiceNo(item) ? ` (Inv #${getPOSupplierInvoiceNo(item)})` : ''}` : item.description}
                             </p>
                             <div className="flex gap-2 mt-2">
                               <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${item.ledgerType === 'PO' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
@@ -1536,7 +1595,10 @@ const Purchases: React.FC<PurchasesProps> = ({
               <div className="p-8 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
                 <div>
                   <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter leading-none">Inventory Intake Terminal</h3>
-                  <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2 italic">Ref: {selectedPO?.id || currentPOId || 'New Acquisition'}</p>
+                  <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2 italic">
+                    Ref: {selectedPO?.id || currentPOId || 'New Acquisition'}
+                    {poSupplierInvoiceNo ? ` • Supplier Inv: ${poSupplierInvoiceNo}` : ''}
+                  </p>
                 </div>
                 <div className="flex items-center gap-4">
                   {syncStatus === 'SAVING' && (
@@ -1710,6 +1772,26 @@ const Purchases: React.FC<PurchasesProps> = ({
                         </select>
                       </div>
                     )}
+
+                    <div className="space-y-2 animate-in slide-in-from-top-2">
+                      <label className="block text-[9px] font-black text-indigo-600 uppercase tracking-widest">Supplier Invoice Number</label>
+                      <input
+                        type="text"
+                        className="w-full px-4 py-3 rounded-xl border border-indigo-200 font-black font-mono bg-white text-xs outline-none focus:border-indigo-500 uppercase text-slate-900 placeholder:font-sans placeholder:font-bold placeholder:text-slate-300"
+                        placeholder="ENTER SUPPLIER INVOICE NO..."
+                        value={poSupplierInvoiceNo}
+                        onChange={e => {
+                          const newVal = e.target.value.toUpperCase();
+                          const prevVal = poSupplierInvoiceNo;
+                          setPoSupplierInvoiceNo(newVal);
+                          setPoItems(prev => prev.map(it =>
+                            (!it.supplierInvoiceNumber || it.supplierInvoiceNumber === prevVal)
+                              ? { ...it, supplierInvoiceNumber: newVal }
+                              : it
+                          ));
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2 mb-6 animate-in slide-in-from-top-2">
@@ -1860,6 +1942,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                             <th className="px-6 py-5 w-12 text-center">#</th>
                             <th className="px-6 py-5">Asset Description</th>
                             <th className="px-6 py-5">SKU</th>
+                            <th className="px-3 py-5 min-w-[130px]">Supplier Inv. No.</th>
                             <th className="px-2 py-5 min-w-[100px] text-right">Unit Cost (Rs.)</th>
                             <th className="px-2 py-5 min-w-[70px] text-center">Qty</th>
                             <th className="px-2 py-5 min-w-[70px] text-center">Free Iss.</th>
@@ -1905,6 +1988,15 @@ const Purchases: React.FC<PurchasesProps> = ({
                                   <span className="text-[9px] font-black font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100 uppercase tracking-tighter">
                                     {product?.sku || item.productSku || 'N/A'}
                                   </span>
+                                </td>
+                                <td className="px-3 py-3">
+                                  <input
+                                    type="text"
+                                    value={item.supplierInvoiceNumber !== undefined ? item.supplierInvoiceNumber : poSupplierInvoiceNo}
+                                    placeholder={poSupplierInvoiceNo || "INV NO..."}
+                                    onChange={e => updatePOItem(idx, 'supplierInvoiceNumber', e.target.value)}
+                                    className="w-full min-w-[120px] px-2.5 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-slate-800 uppercase bg-white focus:border-indigo-500 transition-all outline-none"
+                                  />
                                 </td>
                                 <td className="px-2 py-3">
                                   <input
@@ -1985,7 +2077,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                           })}
                           {poItems.length === 0 && (
                             <tr>
-                              <td colSpan={10} className="py-24 text-center">
+                              <td colSpan={11} className="py-24 text-center">
                                 <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em] italic leading-relaxed">
                                   MANIFEST VOID<br />
                                   <span className="tracking-widest opacity-50">Select items from catalog to initialize intake</span>

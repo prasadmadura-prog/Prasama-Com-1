@@ -91,6 +91,7 @@ export interface PurchaseOrderItem {
   productId: string;
   productName?: string; // Store product name at time of PO creation
   productSku?: string;  // Store SKU at time of PO creation
+  supplierInvoiceNumber?: string; // Supplier invoice number
   quantity: number;
   freeQuantity?: number; // Support for free issue items
   cost: number;
@@ -109,6 +110,7 @@ export interface ChequeItem {
 
 export interface PurchaseOrder {
   id: string;
+  supplierInvoiceNumber?: string;
   date: string;
   receivedDate?: string;
   vendorId: string;
