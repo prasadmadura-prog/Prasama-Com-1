@@ -3,6 +3,7 @@ import { Transaction, Product, Customer, UserProfile, BankAccount, DaySession, C
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { getBackendURL } from '../services/config';
 import { formatDateTime, formatDate, formatTime } from '../utils/dateFormatter';
+import { getReloadCommissionRate } from '../utils/reloadUtils';
 import * as XLSX from 'xlsx';
 
 interface SalesHistoryProps {
@@ -22,6 +23,8 @@ interface SalesHistoryProps {
   onCompleteSale?: (tx: Transaction) => Promise<void> | void;
   onLoadMore?: () => void;
   hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onQueryDateRange?: (startDate: string, endDate: string) => Promise<void>;
 }
 
 const SalesHistory: React.FC<SalesHistoryProps> = ({
@@ -40,7 +43,9 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
   onResumeDraft,
   onCompleteSale,
   onLoadMore,
-  hasMore = false
+  hasMore = false,
+  isLoadingMore = false,
+  onQueryDateRange
 }) => {
   const getTodayLocal = () => {
     const d = new Date();
@@ -131,8 +136,15 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
   };
 
-  // Date-aware Mobitel commission rate: 6% from 2026-04-28, else 4%
-  const getMobitelAwareRate = (desc: string, productName: string, categoryName: string, txDate?: string) => {
+  // Provider-aware reload commission rate (uses product's assigned percentage if set, or Mobitel date rule / 4% default)
+  const getMobitelAwareRate = (desc: string, productName: string, categoryName: string, txDate?: string, product?: Product) => {
+    if (product && (
+      (typeof product.reloadCommissionPercent === 'number' && product.reloadCommissionPercent > 0 && product.reloadCommissionPercent < 100) ||
+      (typeof product.reloadCostPercent === 'number' && product.reloadCostPercent > 0 && product.reloadCostPercent < 100) ||
+      (Number(product.price || 0) > 0 && Number(product.cost || 0) > 0 && Number(product.cost || 0) < Number(product.price || 0))
+    )) {
+      return getReloadCommissionRate(product);
+    }
     const d = desc.toUpperCase();
     const p = productName.toUpperCase();
     const c = categoryName.toUpperCase();
@@ -141,7 +153,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const dateStr = txDate ? txDate.split('T')[0] : '0000-00-00';
       return dateStr >= '2026-04-28' ? 0.06 : 0.04;
     }
-    return 0.04;
+    return getReloadCommissionRate(product);
   };
 
   const calculateTransactionProfit = (tx: Transaction) => {
@@ -165,7 +177,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
       const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
       if (isHotReloadItem(item, product, category, tx.description)) {
-        const rate = getMobitelAwareRate(tx.description || '', product?.name || '', category?.name || '', tx.date);
+        const rate = getMobitelAwareRate(tx.description || '', product?.name || '', category?.name || '', tx.date, product);
         return acc + (lineTotal * rate);
       } else {
         const cost = (Number(product?.cost || 0) * Number(item.quantity));
@@ -483,6 +495,17 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           const lineGross = Number(item.quantity) * Number(item.price);
           const lineDiscount = Number(item.discount || 0);
           const lineTotal = lineGross - lineDiscount;
+          const isHotReload = isHotReloadItem(item, product, category, tx.description);
+          const reloadCommRate = isHotReload
+            ? getMobitelAwareRate(tx.description || '', product?.name || '', category?.name || '', tx.date, product)
+            : 0;
+          const reloadCostRate = isHotReload ? (1 - reloadCommRate) : 0;
+          const productCostValue = isHotReload
+            ? Number((lineTotal * reloadCostRate).toFixed(2))
+            : Number(product?.cost || 0);
+          const lineMarginValue = isHotReload
+            ? Number((lineTotal * reloadCommRate).toFixed(2))
+            : (lineTotal - (Number(product?.cost || 0) * Number(item.quantity)));
 
           data.push({
             ...baseInfo,
@@ -495,8 +518,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             'LINE GROSS (RS)': lineGross,
             'LINE DISCOUNT (RS)': lineDiscount,
             'LINE TOTAL (RS)': lineTotal,
-            'PRODUCT COST (RS)': Number(product?.cost || 0),
-            'LINE MARGIN (RS)': lineTotal - (Number(product?.cost || 0) * Number(item.quantity)),
+            'PRODUCT COST (RS)': productCostValue,
+            'LINE MARGIN (RS)': lineMarginValue,
             'TRANSACTION TOTAL (RS)': index === 0 ? Number(tx.amount || 0) : '', // Show total only on first line
             'TX DISCOUNT (RS)': index === 0 ? Number(tx.discount || 0) : '',
             'DESCRIPTION': index === 0 ? (tx.description || '') : ''
@@ -652,9 +675,29 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         return acc + nonReloadAmount;
       }, 0);
 
-    // FIX: Total Revenue should be Non-Reload Revenue + commission% of Reload Sales (Matching POS "Inflow" & Dashboard)
-    // Note: Mobitel uses 6% from 2026-04-28; for aggregate we use per-tx rate in profit but apply avg 4% to revenue display
-    const totalRevenue = revenueExcludingReload + (reloadSales * 0.04);
+    // Calculate reload profit per-transaction using assigned provider rate
+    const reloadProfit = rangeEntries
+      .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
+      .reduce((acc, t) => {
+        if (!t.items) {
+          const desc = (t.description || '').toUpperCase();
+          const isReload = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
+          if (!isReload) return acc;
+          const rate = getMobitelAwareRate(t.description || '', '', '', t.date);
+          return acc + Number(t.amount || 0) * rate;
+        }
+        return acc + t.items.reduce((itemAcc, item) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.id === product?.categoryId);
+          if (!isHotReloadItem(item, product, category, t.description)) return itemAcc;
+          const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
+          const rate = getMobitelAwareRate(t.description || '', product?.name || '', category?.name || '', t.date, product);
+          return itemAcc + lineTotal * rate;
+        }, 0);
+      }, 0);
+
+    // Total Revenue = Non-Reload Revenue + Reload Margin (Matching POS "Inflow" & Dashboard)
+    const totalRevenue = revenueExcludingReload + reloadProfit;
 
     const realizedInflow = rangeEntries
       .filter(s => (s.type === 'SALE' && s.paymentMethod !== 'CREDIT') || s.type === 'CREDIT_PAYMENT' || s.type === 'SALE_HISTORY_IMPORT')
@@ -662,7 +705,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         // For Credit Payment, it's full value
         if (b.type === 'CREDIT_PAYMENT') return a + Number(b.amount || 0);
 
-        // For Sales, we need to respect the 4% logic for reloads
+        // For Sales, we need to respect the provider commission logic for reloads
         if (!b.items) return a + Number(b.amount || 0);
 
         // Calculate sale realization based on Items
@@ -672,7 +715,8 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           const itemNet = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
           if (isHotReloadItem(item, product, category, b.description)) {
-            return acc + (itemNet * 0.04);
+            const rate = getMobitelAwareRate(b.description || '', product?.name || '', category?.name || '', b.date, product);
+            return acc + (itemNet * rate);
           }
           return acc + itemNet;
         }, 0);
@@ -716,26 +760,6 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const totalPurchases = manualPurchases + poPurchases;
 
     // Profit = (NonReload Revenue - NonReload Cost) + commission% of reload sales - totalExpenses
-    // Calculate reload profit per-transaction to apply correct Mobitel rate (6% from 2026-04-28)
-    const reloadProfit = rangeEntries
-      .filter(s => s.type === 'SALE' || s.type === 'SALE_HISTORY_IMPORT')
-      .reduce((acc, t) => {
-        if (!t.items) {
-          const desc = (t.description || '').toUpperCase();
-          const isReload = (desc.includes('RELOAD') && !desc.includes('CARD')) || desc.includes('DIALOG') || desc.includes('MOBITEL') || desc.includes('AIRTEL') || desc.includes('HUTCH');
-          if (!isReload) return acc;
-          const rate = getMobitelAwareRate(t.description || '', '', '', t.date);
-          return acc + Number(t.amount || 0) * rate;
-        }
-        return acc + t.items.reduce((itemAcc, item) => {
-          const product = products.find(p => p.id === item.productId);
-          const category = categories.find(c => c.id === product?.categoryId);
-          if (!isHotReloadItem(item, product, category, t.description)) return itemAcc;
-          const lineTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
-          const rate = getMobitelAwareRate(t.description || '', product?.name || '', category?.name || '', t.date);
-          return itemAcc + lineTotal * rate;
-        }, 0);
-      }, 0);
     const profit = (revenueExcludingReload - costOfRevenue) + reloadProfit - totalExpenses;
 
     // Net Revenue = Total Sales - Total Purchases
@@ -745,7 +769,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
     const roi = costOfRevenue > 0 ? (profit / costOfRevenue) * 100 : 0;
 
     // Cash Position = Opening + Total Sales - Expenses - Purchases (as requested)
-    // Note: totalRevenue here is the gross inflow (Retail + 4% Reload)
+    // Note: totalRevenue here is the gross inflow (Retail + Reload Commission)
     const cashPosition = rangeOpeningBalance + totalRevenue - totalExpenses - totalPurchases;
 
 
@@ -790,7 +814,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
 
           if (isHotReloadItem(item, product, category, s.description)) {
             txReloadRevenue += lineTotal;
-            const rate = getMobitelAwareRate(s.description || '', product?.name || '', category?.name || '', s.date);
+            const rate = getMobitelAwareRate(s.description || '', product?.name || '', category?.name || '', s.date, product);
             txReloadProfit += (lineTotal * rate);
           } else {
             const cost = (Number(product?.cost || 0) * Number(item.quantity));
@@ -849,16 +873,13 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
         {/* Performance Summary - Cards */}
         <div className="bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm flex-1 max-w-2xl">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Operations Performance</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
-            {/* Vertical Divider for MD+ screens */}
-            <div className="absolute left-1/2 top-4 bottom-4 w-px bg-slate-100 hidden md:block"></div>
-
+          <div className="flex flex-col md:flex-row gap-8 relative">
             {/* Reload Sales (Branch Breakdown) */}
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center md:pr-8 md:border-r md:border-slate-100 shrink-0">
               <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-4">Reload Sales</p>
-              <div className="flex justify-between w-full gap-4">
-                {['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].map(branch => (
-                  <div key={branch} className="flex-1 text-center">
+              <div className="flex justify-center w-full">
+                {['CASHIER 1'].map(branch => (
+                  <div key={branch} className="text-center">
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{branch}</p>
                     <p className="text-xl font-black text-rose-600 font-mono tracking-tighter mb-2">
                       Rs. {Math.round(summaryStats.branchBreakdown[branch]?.reloadRevenue || 0).toLocaleString()}
@@ -873,7 +894,7 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
             </div>
 
             {/* Retail Sales (Branch Breakdown) */}
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center flex-1">
               <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest mb-4">Retail Sales</p>
               <div className="flex justify-between w-full gap-4">
                 {['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].map(branch => (
@@ -1072,8 +1093,41 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
               </>
             )}
           </select>
-          <input type="date" className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <input type="date" className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          <input
+            type="date"
+            className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none"
+            value={startDate}
+            onChange={e => {
+              const val = e.target.value;
+              setStartDate(val);
+              if (onQueryDateRange) onQueryDateRange(val, endDate);
+            }}
+          />
+          <input
+            type="date"
+            className="px-6 py-4 rounded-2xl border border-slate-200 bg-white text-xs font-black outline-none"
+            value={endDate}
+            onChange={e => {
+              const val = e.target.value;
+              setEndDate(val);
+              if (onQueryDateRange) onQueryDateRange(startDate, val);
+            }}
+          />
+          {(onQueryDateRange || onLoadMore) && (
+            <button
+              type="button"
+              disabled={isLoadingMore}
+              onClick={() => {
+                if (onQueryDateRange) onQueryDateRange(startDate, endDate);
+                else if (onLoadMore) onLoadMore();
+              }}
+              className="px-5 py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+              title="Fetch all data for selected date range"
+            >
+              <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+              <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+            </button>
+          )}
           <button onClick={() => { setSearchTerm(''); setStartDate(today); setEndDate(today); setCashierFilter('ALL'); }} className="px-4 py-4 rounded-2xl border border-slate-200 bg-slate-50 text-[10px] font-black uppercase hover:bg-slate-100 transition-all">↺ Reset</button>
         </div>
       </div>
@@ -1218,26 +1272,46 @@ const SalesHistory: React.FC<SalesHistoryProps> = ({
           </table>
 
           {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="px-8 py-6 bg-slate-50/50 border-t border-slate-50 flex items-center justify-between">
+          {(totalPages > 1 || (onLoadMore && hasMore)) && (
+            <div className="px-8 py-6 bg-slate-50/50 border-t border-slate-50 flex flex-wrap items-center justify-between gap-4">
               <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                Showing Page {currentPage} of {totalPages} ({filteredEntries.length} Records)
+                Showing Page {currentPage} of {Math.max(1, totalPages)} ({filteredEntries.length} loaded records)
               </p>
-              <div className="flex gap-2">
-                <button
-                  disabled={currentPage === 1}
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
-                >
-                  ← Previous
-                </button>
-                <button
-                  disabled={currentPage === totalPages}
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
-                >
-                  Next →
-                </button>
+              <div className="flex items-center gap-3">
+                {onLoadMore && hasMore && (
+                  <button
+                    type="button"
+                    disabled={isLoadingMore}
+                    onClick={() => {
+                      if (startDate === today && endDate === today) {
+                        setStartDate('');
+                        setEndDate('');
+                      }
+                      onLoadMore();
+                    }}
+                    className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-indigo-50 border border-indigo-200 text-indigo-600 hover:bg-indigo-100 shadow-sm disabled:opacity-50"
+                  >
+                    {isLoadingMore ? '⏳ Fetching All Data...' : '⚡ Fetch All Data'}
+                  </button>
+                )}
+                {totalPages > 1 && (
+                  <div className="flex gap-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
+                    >
+                      ← Previous
+                    </button>
+                    <button
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all bg-white border border-slate-200 text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

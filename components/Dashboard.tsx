@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Transaction, Product, BankAccount, View, PurchaseOrder, DaySession, Customer, Vendor, Category, UserProfile, FixedAsset } from '../types';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { isHotReloadProduct, getReloadCommissionRate, getReloadCostRate } from '../utils/reloadUtils';
 
 interface DashboardProps {
   transactions: Transaction[];
@@ -71,13 +72,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         const p = products.find(prod => prod.id === item.productId);
         if (p) {
           const productCategory = categories.find(c => c.id === p.categoryId);
-          const categoryName = (productCategory?.name || '').toUpperCase();
-          const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+          const isHotReload = isHotReloadProduct(p, productCategory, t.description, item.productId);
 
           let itemCost = Number(p.cost || 0);
           if (isHotReload) {
-            // Hot Reload Cost = 96% of Selling Price
-            itemCost = Number(item.price) * 0.96;
+            itemCost = Number(item.price) * getReloadCostRate(p);
           }
           fallback += itemCost * Number(item.quantity);
         }
@@ -85,9 +84,10 @@ const Dashboard: React.FC<DashboardProps> = ({
       return fallback;
     };
 
-    // Calculate revenue (EXCLUDING hot reload) and hot reload sales separately
+    // Calculate revenue (EXCLUDING hot reload) and hot reload sales/profit separately
     let revenue = 0;
     let reloadSales = 0;
+    let reloadProfit = 0;
     let todayCOGS = 0;
 
     todayTxs
@@ -97,13 +97,13 @@ const Dashboard: React.FC<DashboardProps> = ({
           t.items.forEach(item => {
             const p = products.find(prod => prod.id === item.productId);
             const productCategory = categories.find(c => c.id === p?.categoryId);
-            const categoryName = (productCategory?.name || '').toUpperCase();
-            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+            const isHotReload = isHotReloadProduct(p, productCategory, t.description, item.productId);
 
             const itemTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
 
             if (isHotReload) {
               reloadSales += itemTotal;
+              reloadProfit += itemTotal * getReloadCommissionRate(p);
             } else {
               revenue += itemTotal;
               todayCOGS += Number(p?.cost || 0) * Number(item.quantity);
@@ -116,9 +116,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
       });
 
-    // Profit = (Retail Revenue - Cost) + 4% of Hot Reload Sales
-    const profit = (revenue - todayCOGS) + (reloadSales * 0.04);
-    const effectiveRevenue = revenue + (reloadSales * 0.04);
+    // Profit = (Retail Revenue - Cost) + Assigned % of Hot Reload Sales
+    const profit = (revenue - todayCOGS) + reloadProfit;
+    const effectiveRevenue = revenue + reloadProfit;
     const margin = effectiveRevenue > 0 ? (profit / effectiveRevenue) * 100 : 0;
 
     // FIX: Treat daily opening balance as a zero value for calculations

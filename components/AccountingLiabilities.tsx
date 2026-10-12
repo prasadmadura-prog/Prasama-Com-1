@@ -179,7 +179,7 @@ const AccountingLiabilities: React.FC<AccountingLiabilitiesProps> = ({
     const liabilitiesByDate = useMemo(() => {
         const map: Record<string, Transaction[]> = {};
         filteredLiabilities.forEach(tx => {
-            const dateKey = tx.date.split('T')[0]; // "YYYY-MM-DD"
+            const dateKey = (tx.date || '').split('T')[0]; // "YYYY-MM-DD"
             if (!map[dateKey]) map[dateKey] = [];
             map[dateKey].push(tx);
         });
@@ -318,7 +318,7 @@ const AccountingLiabilities: React.FC<AccountingLiabilitiesProps> = ({
         setEditAmount(String(tx.amount));
         setEditDesc(tx.description);
         setEditCat(tx.category || 'Uncategorized');
-        setEditDate(tx.date.split('T')[0]);
+        setEditDate((tx.date || '').split('T')[0]);
         setEditBranch(tx.branchId || 'CASHIER 1');
         setEditAttachment(tx.attachment || '');
         setEditAttachmentName(tx.attachmentName || '');
@@ -866,7 +866,7 @@ const AccountingLiabilities: React.FC<AccountingLiabilitiesProps> = ({
                                                 <td className="p-4">
                                                     <span className="text-xs font-black text-rose-800 uppercase tracking-wider">{tx.category}</span>
                                                     <span className="text-sm font-bold text-slate-800 block mt-0.5">{tx.description}</span>
-                                                    <span className="text-[10px] text-slate-400 font-mono block mt-0.5">Billed on {tx.date.split('T')[0]} • {tx.branchId || 'GLOBAL'}</span>
+                                                    <span className="text-[10px] text-slate-400 font-mono block mt-0.5">Billed on {(tx.date || '').split('T')[0]} • {tx.branchId || 'GLOBAL'}</span>
                                                 </td>
                                                 <td className="p-4 text-center">
                                                     <span className="font-black font-mono text-slate-900 text-sm">Rs. {tx.amount.toLocaleString()}</span>
@@ -1130,7 +1130,7 @@ const AccountingLiabilities: React.FC<AccountingLiabilitiesProps> = ({
                                 </span>
                                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter mt-2">{selectedCalendarTx.description}</h3>
                                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                                    Billed on {selectedCalendarTx.date.split('T')[0]} • {selectedCalendarTx.branchId || 'GLOBAL'}
+                                    Billed on {(selectedCalendarTx.date || '').split('T')[0]} • {selectedCalendarTx.branchId || 'GLOBAL'}
                                 </p>
                             </div>
                             <button

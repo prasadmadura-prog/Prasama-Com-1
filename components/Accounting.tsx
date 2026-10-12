@@ -14,6 +14,9 @@ interface AccountingProps {
     fixedAssets: FixedAsset[];
     userProfile: UserProfile;
     daySessions: DaySession[];
+    onFetchData?: (startDate?: string, endDate?: string) => Promise<void>;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
 }
 
 
@@ -45,7 +48,7 @@ const downloadExcel = (workbook: XLSX.WorkBook, filename: string) => {
     }
 };
 
-const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders, fixedAssets = [], userProfile, daySessions = [] }) => {
+const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, customers, vendors, products, categories, purchaseOrders, fixedAssets = [], userProfile, daySessions = [], onFetchData, hasMore = false, isLoadingMore = false }) => {
     const [activeReport, setActiveReport] = useState<'BALANCE_SHEET' | 'INCOME_STATEMENT' | 'PROFIT_LOSS_LEDGER' | 'TRIAL_BALANCE' | 'CATEGORY_REPORT' | 'CRITICAL_STOCK' | 'DAILY_SUMMARY' | 'PURCHASES' | 'LIABILITIES'>('BALANCE_SHEET');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -68,27 +71,35 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     };
 
-    const getFirstDayOfMonth = () => {
+    const getFirstDayOfYear = () => {
         const d = new Date();
-        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+        return d.getFullYear() + '-01-01';
     };
 
-    // Initialize with current month
+    // Initialize with current year start and today's date
     React.useEffect(() => {
-        if (!startDate) setStartDate(getFirstDayOfMonth());
+        if (!startDate) setStartDate(getFirstDayOfYear());
         if (!endDate) setEndDate(getTodayLocal());
         if (!userProfile.isAdmin && userProfile.branch) {
             setSelectedCashier(userProfile.branch);
         }
     }, [userProfile]);
 
+    // Ensure startDate is never after endDate when endDate is adjusted
+    React.useEffect(() => {
+        if (startDate && endDate && startDate > endDate) {
+            setStartDate(`${endDate.slice(0, 4)}-01-01`);
+        }
+    }, [endDate]);
+
     const filteredTransactions = useMemo(() => {
         return transactions.filter(t => {
-            const txDate = t.date.split('T')[0];
-            const isSingleDateReport = activeReport === 'BALANCE_SHEET' || activeReport === 'LIABILITIES' || activeReport === 'PROFIT_LOSS_LEDGER';
+            const txDate = (t.date || '').split('T')[0];
+            const isSingleDateReport = activeReport === 'BALANCE_SHEET' || activeReport === 'LIABILITIES';
+            const effectiveStart = (startDate && endDate && startDate > endDate) ? `${endDate.slice(0, 4)}-01-01` : startDate;
             const dateMatch = isSingleDateReport
                 ? (!endDate || txDate <= endDate)
-                : ((!startDate || txDate >= startDate) && (!endDate || txDate <= endDate));
+                : ((!effectiveStart || txDate >= effectiveStart) && (!endDate || txDate <= endDate));
             const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
             return dateMatch && cashierMatch;
         });
@@ -131,7 +142,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         if (t.type !== 'PURCHASE') return false;
 
         // Check description for manual/legacy entries
-        if (t.description.toUpperCase().includes('RELOAD')) return true;
+        if ((t.description || '').toUpperCase().includes('RELOAD')) return true;
 
         // Check linked Purchase Order
         const poId = t.description?.match(/PO-[A-Z0-9]+/i)?.[0] || t.description?.split(': ').pop();
@@ -158,7 +169,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
           if (!accId) return 'Cash / Bank';
           const acc = accounts.find(a => a.id === accId);
           if (!acc) return 'Cash / Bank';
-          const upperName = acc.name.toUpperCase().trim();
+          const upperName = (acc.name || '').toUpperCase().trim();
           if (upperName === 'DIRECTOR C/A' || upperName === 'DIRECTOR CURRENT ACCOUNT' || upperName.includes('DIRECTOR')) {
             return 'Director C/A';
           }
@@ -251,7 +262,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         // 2. ACCOUNTS RECEIVABLE (Backtracked based on transactions after endDay)
         const customerCredits: Record<string, number> = { ...customers.reduce((map, c) => ({ ...map, [c.id]: Number(c.totalCredit || 0) }), {} as Record<string, number>) };
         transactions.forEach(t => {
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 if (t.customerId) {
@@ -278,7 +289,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             });
 
             transactions.forEach(t => {
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate <= endDay && t.status !== 'VOID' && t.status !== 'DRAFT') {
                     const amt = Number(t.amount || 0);
                     const cashier = t.branchId;
@@ -326,7 +337,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             transactions.forEach(t => {
                 if (t.status === 'VOID' || t.status === 'DRAFT') return;
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate > endDay) {
                     const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
                     if (!cashierMatch) return;
@@ -356,7 +367,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         // 5. ACCOUNTS PAYABLE (Backtracked based on transactions after endDay)
         const vendorBalances: Record<string, number> = { ...vendors.reduce((map, v) => ({ ...map, [v.id]: Number(v.totalBalance || 0) }), {} as Record<string, number>) };
         transactions.forEach(t => {
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 if (t.vendorId) {
@@ -379,7 +390,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT' || t.type !== 'JOURNAL') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return;
             
             const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
@@ -419,7 +430,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const totalAssets = cashAndBank + finalAccountsReceivable + finalInventory + (finalFixedAssetsCost - finalAccumulatedDepreciation);
         
         const accruedExpenses = transactions.filter(t => {
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return false;
             if (t.type !== 'EXPENSE') return false;
             
@@ -428,8 +439,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             
             if (t.paymentMethod === 'CREDIT' && t.status !== 'VOID') return true;
             
-            const isAccrued = t.id.startsWith('EX-CREDIT-');
-            if (isAccrued && t.updatedAt && t.updatedAt.split('T')[0] > endDay) return true;
+            const isAccrued = (t.id || '').startsWith('EX-CREDIT-');
+            if (isAccrued && t.updatedAt && String(t.updatedAt).split('T')[0] > endDay) return true;
             
             return false;
         }).reduce((sum, t) => sum + Number(t.amount || 0), 0);
@@ -441,7 +452,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         let directorCAMovementAfterEndDay = 0;
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 const isDirectorSource = t.accountId && getAccountLedgerName(t.accountId) === 'Director C/A';
@@ -501,7 +512,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 if (t.customerId) {
@@ -522,7 +533,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             });
 
             transactions.forEach(t => {
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate <= endDay && t.status !== 'VOID' && t.status !== 'DRAFT') {
                     const amt = Number(t.amount || 0);
                     const cashier = t.branchId;
@@ -582,7 +593,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         let journalARAdj = 0;
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT' || t.type !== 'JOURNAL') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return;
 
             const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
@@ -613,7 +624,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 if (t.vendorId) {
@@ -634,7 +645,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             });
 
             transactions.forEach(t => {
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate <= endDay && t.status !== 'VOID' && t.status !== 'DRAFT') {
                     const amt = Number(t.amount || 0);
                     const cashier = t.branchId;
@@ -693,7 +704,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         let journalAPAdj = 0;
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT' || t.type !== 'JOURNAL') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return;
 
             const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
@@ -722,21 +733,27 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         };
 
         const getTxCostBasis = (t: Transaction) => {
-            if (t.costBasis !== undefined) return t.costBasis;
             let fallback = 0;
+            let hasHotReload = false;
             t.items?.forEach(item => {
-                const p = products.find(prod => prod.id === item.productId);
-                if (p) {
-                    const category = categories.find(c => c.id === p.categoryId);
-                    if (isHotReloadItem(item, p, category, t.description)) {
-                        // Reload cost approx 96%
-                        fallback += (Number(item.price) * Number(item.quantity) * 0.96);
-                    } else {
-                        fallback += Number(p.cost || 0) * Number(item.quantity);
-                    }
+                const p = products.find(prod => prod.id === item.productId || prod.sku === item.productId || prod.name === item.productId);
+                const category = p ? categories.find(c => c.id === p.categoryId) : undefined;
+                const qty = Number(item.quantity || 0);
+                const price = Number(item.price || p?.price || 0);
+                const discount = Number(item.discount || 0);
+                const lineTotal = Math.max(0, (qty * price) - discount);
+
+                if (isHotReloadItem(item, p, category, t.description)) {
+                    hasHotReload = true;
+                    const costRate = 1 - getReloadProfitRate(item, p, category, t.description);
+                    fallback += lineTotal * costRate;
+                } else {
+                    fallback += Number((item as any).cost || p?.cost || 0) * qty;
                 }
             });
-            return fallback;
+            const stored = Number(t.costBasis || 0);
+            if (hasHotReload) return fallback;
+            return stored > 0 ? stored : fallback;
         };
 
         // Calculate manual journal adjustments for revenue, COGS, and depreciation expense
@@ -776,7 +793,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         // COST OF GOODS SOLD
         let cogs = 0;
         filteredTransactions.forEach(tx => {
-            if (tx.type === 'SALE') {
+            if (tx.type === 'SALE' || tx.type === 'SALE_HISTORY_IMPORT') {
                 cogs += getTxCostBasis(tx);
             }
         });
@@ -909,23 +926,26 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 revenue = Number(t.amount || 0);
                 totalRevenue += revenue;
 
-                if (t.type === 'SALE') {
-                    if (t.costBasis !== undefined) {
-                        cogs = t.costBasis;
+                let fallbackCogs = 0;
+                let hasHotReload = false;
+                t.items?.forEach(item => {
+                    const p = products.find(prod => prod.id === item.productId || prod.sku === item.productId || prod.name === item.productId);
+                    const category = p ? categories.find(c => c.id === p.categoryId) : undefined;
+                    const qty = Number(item.quantity || 0);
+                    const price = Number(item.price || p?.price || 0);
+                    const discount = Number(item.discount || 0);
+                    const lineTotal = Math.max(0, (qty * price) - discount);
+
+                    if (isHotReloadItem(item, p, category, t.description)) {
+                        hasHotReload = true;
+                        const costRate = 1 - getReloadProfitRate(item, p, category, t.description);
+                        fallbackCogs += lineTotal * costRate;
                     } else {
-                        t.items?.forEach(item => {
-                            const p = products.find(prod => prod.id === item.productId);
-                            if (p) {
-                                const category = categories.find(c => c.id === p.categoryId);
-                                if (isHotReloadItem(item, p, category, t.description)) {
-                                    cogs += (Number(item.price) * Number(item.quantity) * 0.96);
-                                } else {
-                                    cogs += Number(p.cost || 0) * Number(item.quantity);
-                                }
-                            }
-                        });
+                        fallbackCogs += Number((item as any).cost || p?.cost || 0) * qty;
                     }
-                }
+                });
+                const storedCogs = Number(t.costBasis || 0);
+                cogs = hasHotReload ? fallbackCogs : (storedCogs > 0 ? storedCogs : fallbackCogs);
                 totalCogs += cogs;
                 netProfitContrib = revenue - cogs;
             } else if (t.type === 'EXPENSE') {
@@ -975,7 +995,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 customerId: t.customerId,
                 vendorId: t.vendorId
             };
-        }).sort((a, b) => b.date.localeCompare(a.date));
+        }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
         const grossProfit = totalRevenue - totalCogs;
         const netProfit = grossProfit - totalExpenses;
@@ -998,10 +1018,10 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         return profitLossLedgerData.stream.filter(item => {
             const matchesType = pnlTypeFilter === 'ALL' || item.type === pnlTypeFilter;
             const matchesSearch = !pnlLedgerSearch ||
-                item.id.toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
-                item.category.toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
-                item.description.toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
-                item.branchId.toLowerCase().includes(pnlLedgerSearch.toLowerCase());
+                (item.id || '').toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
+                (item.category || '').toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
+                (item.description || '').toLowerCase().includes(pnlLedgerSearch.toLowerCase()) ||
+                (item.branchId || '').toLowerCase().includes(pnlLedgerSearch.toLowerCase());
 
             return matchesType && matchesSearch;
         });
@@ -1017,7 +1037,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         };
 
         transactions.forEach(t => {
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) {
                 const amt = Number(t.amount || 0);
                 if (t.vendorId) {
@@ -1055,7 +1075,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
         // Analyze expenses up to endDay
         const utilityTxs = transactions.filter(t => {
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             return t.type === 'EXPENSE' && txDate <= endDay && t.status !== 'VOID' && t.status !== 'DRAFT';
         });
 
@@ -1069,13 +1089,13 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             if (catTxs.length > 0) {
                 // Sort by date descending
-                catTxs.sort((a, b) => b.date.localeCompare(a.date));
+                catTxs.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
                 const lastTx = catTxs[0];
-                const lastDate = lastTx.date.split('T')[0];
+                const lastDate = (lastTx.date || '').split('T')[0];
                 const lastAmt = lastTx.amount;
                 const totalAmt = catTxs.reduce((sum, t) => sum + t.amount, 0);
                 
-                const uniqueMonths = new Set(catTxs.map(t => t.date.slice(0, 7)));
+                const uniqueMonths = new Set(catTxs.map(t => (t.date || '').slice(0, 7)));
                 const monthsCount = Math.max(1, uniqueMonths.size);
                 const avgMonthly = totalAmt / monthsCount;
 
@@ -1128,7 +1148,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                     });
                 } else {
                     // Legacy No Item Tx
-                    if (t.description.toUpperCase().includes('RELOAD')) return;
+                    if ((t.description || '').toUpperCase().includes('RELOAD')) return;
 
                     const categoryName = 'Uncategorized';
                     const revenue = Number(t.amount || 0);
@@ -1155,7 +1175,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const dayMap: Record<string, { revenue: number; reloadRevenue: number; reloadProfit: number; purchases: number; expense: number; profit: number }> = {};
 
         transactions.forEach(t => {
-            const txDateKey = t.date.split('T')[0];
+            const txDateKey = (t.date || '').split('T')[0];
+            if (!txDateKey) return;
 
             // Define standard date checks for Sales/Expenses
             const isWithinRange = (date: string) => (!startDate || date >= startDate) && (!endDate || date <= endDate);
@@ -1185,7 +1206,8 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                     });
                 } else {
                     const amount = Number(t.amount || 0);
-                    const isHot = t.description.toUpperCase().includes('RELOAD') && !t.description.toUpperCase().includes('CARD');
+                    const descUpper = (t.description || '').toUpperCase();
+                    const isHot = descUpper.includes('RELOAD') && !descUpper.includes('CARD');
                     if (isHot) {
                         const rate = getReloadProfitRate(null, undefined, undefined, t.description);
                         const rProfit = amount * rate;
@@ -1283,7 +1305,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
     // Purchases Calculations
     const purchasesReport = useMemo(() => {
         const list = filteredTransactions.filter(t => t.type === 'PURCHASE');
-        return list.sort((a, b) => b.date.localeCompare(a.date));
+        return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     }, [filteredTransactions]);
 
     const purchasesSummary = useMemo(() => {
@@ -1304,14 +1326,14 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
     const getVendorName = (id?: string) => {
         if (!id) return 'UNKNOWN VENDOR';
-        const v = vendors.find(ven => ven.id.trim().toUpperCase() === id.trim().toUpperCase());
+        const v = vendors.find(ven => (ven.id || '').trim().toUpperCase() === id.trim().toUpperCase());
         return v ? v.name : 'UNKNOWN VENDOR';
     };
 
     const getTransactionPurchaseItems = (t: Transaction) => {
         const getVendorObj = (id?: string) => {
             if (!id) return null;
-            return vendors.find(ven => ven.id.trim().toUpperCase() === id.trim().toUpperCase());
+            return vendors.find(ven => (ven.id || '').trim().toUpperCase() === id.trim().toUpperCase());
         };
 
         const vendor = getVendorObj(t.vendorId);
@@ -1342,14 +1364,14 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             const matches = t.description.match(/PO-[A-Za-z0-9_-]+/gi) || t.description.match(/PO-\d+/gi);
             if (matches && matches.length > 0) {
                 const targetPoId = matches[0].trim().toUpperCase();
-                linkedPO = purchaseOrders.find(p => p.id.trim().toUpperCase() === targetPoId || targetPoId.includes(p.id.trim().toUpperCase()) || p.id.trim().toUpperCase().includes(targetPoId));
+                linkedPO = purchaseOrders.find(p => (p.id || '').trim().toUpperCase() === targetPoId || targetPoId.includes((p.id || '').trim().toUpperCase()) || (p.id || '').trim().toUpperCase().includes(targetPoId));
             }
         }
 
         // Case 1: Direct t.items array
         if (t.items && t.items.length > 0) {
             t.items.forEach(item => {
-                const prod = products.find(p => p.id === item.productId || p.sku === item.productId || p.name.trim().toUpperCase() === item.productId.trim().toUpperCase());
+                const prod = products.find(p => p.id === item.productId || p.sku === item.productId || (p.name || '').trim().toUpperCase() === (item.productId || '').trim().toUpperCase());
                 let pName = prod ? prod.name : ((item as any).productName || item.productId);
                 let sku = prod?.sku || (item as any).productSku || 'N/A';
 
@@ -1386,7 +1408,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         // Case 2: Unpack from Linked Purchase Order if t.items is empty
         if (linkedPO && linkedPO.items && linkedPO.items.length > 0) {
             linkedPO.items.forEach(item => {
-                const prod = products.find(p => p.id === item.productId || p.sku === item.productSku || p.name.trim().toUpperCase() === (item.productName || '').trim().toUpperCase());
+                const prod = products.find(p => p.id === item.productId || p.sku === item.productSku || (p.name || '').trim().toUpperCase() === (item.productName || '').trim().toUpperCase());
                 const pName = prod?.name || item.productName || item.productId;
                 const sku = prod?.sku || item.productSku || 'N/A';
                 const qty = Number(item.quantity || 0);
@@ -1596,7 +1618,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             XLSX.utils.book_append_sheet(workbook, ws05, "Note 05 - AP");
 
             // Note 06
-            const accruedTxs = transactions.filter(t => t.status !== 'VOID' && t.status !== 'DRAFT' && t.date.split('T')[0] <= endDay && t.type === 'EXPENSE' && t.paymentMethod === 'CREDIT');
+            const accruedTxs = transactions.filter(t => t.status !== 'VOID' && t.status !== 'DRAFT' && (t.date || '').split('T')[0] <= endDay && t.type === 'EXPENSE' && t.paymentMethod === 'CREDIT');
             const accRows = accruedTxs.map(t => ({ 'REFERENCE ID': t.id, 'DATE & TIME': formatDateTime(t.date), 'DESCRIPTION': t.description || 'N/A', 'CATEGORY': t.category || 'N/A', 'AMOUNT (Rs.)': Number(t.amount || 0) }));
             const ws06 = XLSX.utils.json_to_sheet(accRows);
             ws06['!cols'] = [{ wch: 22 }, { wch: 20 }, { wch: 35 }, { wch: 20 }, { wch: 20 }];
@@ -1681,14 +1703,20 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         try {
             const productSalesMap: Record<string, { name: string; sku: string; category: string; qtySold: number; costBasis: number }> = {};
             filteredTransactions.forEach(t => {
-                if (t.status === 'VOID' || t.status === 'DRAFT' || t.type !== 'SALE') return;
+                if (t.status === 'VOID' || t.status === 'DRAFT' || (t.type !== 'SALE' && t.type !== 'SALE_HISTORY_IMPORT')) return;
                 (t.items || []).forEach(item => {
-                    const prod = products.find(p => p.id === item.productId);
-                    const cat = prod?.categoryId ? categories.find(c => c.id === prod.categoryId)?.name : 'N/A';
+                    const prod = products.find(p => p.id === item.productId || p.sku === item.productId || p.name === item.productId);
+                    const catObj = prod?.categoryId ? categories.find(c => c.id === prod.categoryId) : undefined;
+                    const cat = catObj?.name || 'N/A';
                     const pKey = item.productId || 'UNKNOWN';
                     const pName = prod?.name || item.productId || 'Unknown Item';
                     const qty = Number(item.quantity || 0);
-                    let itemCost = prod ? (isHotReloadItem(item, prod, categories.find(c => c.id === prod.categoryId), t.description) ? Number(item.price) * qty * 0.96 : Number(prod.cost || 0) * qty) : 0;
+                    const price = Number(item.price || prod?.price || 0);
+                    const discount = Number(item.discount || 0);
+                    const lineTotal = Math.max(0, (qty * price) - discount);
+                    const itemCost = isHotReloadItem(item, prod, catObj, t.description)
+                        ? lineTotal * (1 - getReloadProfitRate(item, prod, catObj, t.description))
+                        : Number((item as any).cost || prod?.cost || 0) * qty;
                     if (!productSalesMap[pKey]) {
                         productSalesMap[pKey] = { name: pName, sku: prod?.sku || 'N/A', category: cat || 'N/A', qtySold: 0, costBasis: 0 };
                     }
@@ -1815,7 +1843,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             if (!accId) return 'Cash / Bank';
             const acc = accounts.find(a => a.id === accId);
             if (!acc) return 'Cash / Bank';
-            const upperName = acc.name.toUpperCase().trim();
+            const upperName = (acc.name || '').toUpperCase().trim();
             if (upperName === 'DIRECTOR C/A' || upperName === 'DIRECTOR CURRENT ACCOUNT' || upperName.includes('DIRECTOR')) {
                 return 'Director C/A';
             }
@@ -1840,7 +1868,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
         transactions.forEach(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT') return;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return;
 
             const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
@@ -2054,7 +2082,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const detailedARData = transactions
             .filter(t => {
                 if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate > endDay) return false;
                 const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
                 if (!cashierMatch) return false;
@@ -2145,7 +2173,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             transactions.forEach(t => {
                 if (t.status === 'VOID' || t.status === 'DRAFT') return;
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate > endDay) {
                     const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
                     if (!cashierMatch) return;
@@ -2205,7 +2233,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const detailedAPData = transactions
             .filter(t => {
                 if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate > endDay) return false;
                 const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
                 if (!cashierMatch) return false;
@@ -2292,7 +2320,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
         const endDay = endDate ? endDate : getTodayLocal();
         const accruedTxs = transactions.filter(t => {
             if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if (txDate > endDay) return false;
             return t.type === 'EXPENSE' && t.paymentMethod === 'CREDIT';
         });
@@ -2362,7 +2390,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
                 if (!accId) return '';
                 const acc = accounts.find(a => a.id === accId);
                 if (!acc) return '';
-                const upperName = acc.name.toUpperCase().trim();
+                const upperName = (acc.name || '').toUpperCase().trim();
                 if (upperName === 'DIRECTOR C/A' || upperName === 'DIRECTOR CURRENT ACCOUNT' || upperName.includes('DIRECTOR')) {
                     return 'Director C/A';
                 }
@@ -2371,7 +2399,7 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
 
             const directorTxs = transactions.filter(t => {
                 if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-                const txDate = t.date.split('T')[0];
+                const txDate = (t.date || '').split('T')[0];
                 if (txDate > endDay) return false;
                 const isDirSrc = t.accountId && getAccountLedgerName(t.accountId) === 'Director C/A';
                 const isDirDest = t.destinationAccountId && getAccountLedgerName(t.destinationAccountId) === 'Director C/A';
@@ -2629,22 +2657,21 @@ const Accounting: React.FC<AccountingProps> = ({ transactions, accounts, custome
             const productSalesMap: Record<string, { name: string; sku: string; category: string; qtySold: number; costBasis: number }> = {};
 
             filteredTransactions.forEach(t => {
-                if (t.status === 'VOID' || t.status === 'DRAFT' || t.type !== 'SALE') return;
+                if (t.status === 'VOID' || t.status === 'DRAFT' || (t.type !== 'SALE' && t.type !== 'SALE_HISTORY_IMPORT')) return;
                 (t.items || []).forEach(item => {
-                    const prod = products.find(p => p.id === item.productId);
-                    const cat = prod?.categoryId ? categories.find(c => c.id === prod.categoryId)?.name : 'N/A';
+                    const prod = products.find(p => p.id === item.productId || p.sku === item.productId || p.name === item.productId);
+                    const catObj = prod?.categoryId ? categories.find(c => c.id === prod.categoryId) : undefined;
+                    const cat = catObj?.name || 'N/A';
                     const pKey = item.productId || 'UNKNOWN';
                     const pName = prod?.name || item.productId || 'Unknown Item';
                     const qty = Number(item.quantity || 0);
+                    const price = Number(item.price || prod?.price || 0);
+                    const discount = Number(item.discount || 0);
+                    const lineTotal = Math.max(0, (qty * price) - discount);
 
-                    let itemCost = 0;
-                    if (prod) {
-                        if (isHotReloadItem(item, prod, categories.find(c => c.id === prod.categoryId), t.description)) {
-                            itemCost = Number(item.price) * qty * 0.96;
-                        } else {
-                            itemCost = Number(prod.cost || 0) * qty;
-                        }
-                    }
+                    const itemCost = isHotReloadItem(item, prod, catObj, t.description)
+                        ? lineTotal * (1 - getReloadProfitRate(item, prod, catObj, t.description))
+                        : Number((item as any).cost || prod?.cost || 0) * qty;
 
                     if (!productSalesMap[pKey]) {
                         productSalesMap[pKey] = {
@@ -2921,7 +2948,7 @@ const handleExportCriticalStock = () => {
         try {
             const getVendorObj = (id?: string) => {
                 if (!id) return null;
-                return vendors.find(ven => ven.id.trim().toUpperCase() === id.trim().toUpperCase());
+                return vendors.find(ven => (ven.id || '').trim().toUpperCase() === id.trim().toUpperCase());
             };
 
             const workbook = XLSX.utils.book_new();
@@ -3143,7 +3170,11 @@ const handleExportCriticalStock = () => {
                                     <input
                                         type="date"
                                         value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setStartDate(val);
+                                            if (onFetchData) onFetchData(val, endDate);
+                                        }}
                                         className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-mono text-xs md:text-sm"
                                     />
                                 </div>
@@ -3155,10 +3186,26 @@ const handleExportCriticalStock = () => {
                                 <input
                                     type="date"
                                     value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        setEndDate(val);
+                                        if (onFetchData) onFetchData(startDate, val);
+                                    }}
                                     className="px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-mono text-xs md:text-sm"
                                 />
                             </div>
+                            {onFetchData && (
+                                <button
+                                    type="button"
+                                    disabled={isLoadingMore}
+                                    onClick={() => onFetchData(startDate, endDate)}
+                                    className="px-5 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+                                    title="Fetch all data for selected date range"
+                                >
+                                    <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+                                    <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+                                </button>
+                            )}
                             <div>
                                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Select Cashier</label>
                                 <select
@@ -4935,12 +4982,12 @@ const handleExportCriticalStock = () => {
                                             </thead>
                                             <tbody>
                                                 {transactions
-                                                    .filter(t => t.customerId === selectedARCustomer.id && t.status !== 'VOID' && t.status !== 'DRAFT' && t.date.split('T')[0] <= arBreakupDetails.endDay)
+                                                    .filter(t => t.customerId === selectedARCustomer.id && t.status !== 'VOID' && t.status !== 'DRAFT' && (t.date || '').split('T')[0] <= arBreakupDetails.endDay)
                                                     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                                                     .map((t, idx) => (
                                                         <tr key={t.id || idx} className="border-b border-slate-100 hover:bg-slate-50 text-xs font-medium">
                                                             <td className="py-3 px-4 text-slate-600">{formatDateTime(t.date)}</td>
-                                                            <td className="py-3 px-4 font-mono font-bold text-slate-800">{t.id.substring(0, 12)}</td>
+                                                            <td className="py-3 px-4 font-mono font-bold text-slate-800">{(t.id || '').substring(0, 12)}</td>
                                                             <td className="py-3 px-4">
                                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
                                                                     t.type === 'SALE' ? 'bg-amber-100 text-amber-700' :
@@ -4986,7 +5033,7 @@ const handleExportCriticalStock = () => {
                                             {transactions
                                                 .filter(t => {
                                                     if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-                                                    const txDate = t.date.split('T')[0];
+                                                    const txDate = (t.date || '').split('T')[0];
                                                     if (txDate > arBreakupDetails.endDay) return false;
                                                     const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;
                                                     if (!cashierMatch) return false;
@@ -5001,8 +5048,8 @@ const handleExportCriticalStock = () => {
                                                     const query = arSearch.toLowerCase();
                                                     const cust = t.customerId ? customers.find(c => c.id === t.customerId) : undefined;
                                                     const detailsStr = getItemDetailsStr(t).toLowerCase();
-                                                    return t.id.toLowerCase().includes(query) ||
-                                                        (cust && cust.name.toLowerCase().includes(query)) ||
+                                                    return (t.id || '').toLowerCase().includes(query) ||
+                                                        (cust && (cust.name || '').toLowerCase().includes(query)) ||
                                                         (cust && cust.phone && cust.phone.toLowerCase().includes(query)) ||
                                                         detailsStr.includes(query);
                                                 })
@@ -5028,7 +5075,7 @@ const handleExportCriticalStock = () => {
                                                     return (
                                                         <tr key={t.id || idx} className={`border-b border-slate-100 hover:bg-indigo-50/30 transition-colors ${idx % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                                                             <td className="py-3 px-4 font-mono text-[10px] text-slate-600 whitespace-nowrap">{formatDateTime(t.date)}</td>
-                                                            <td className="py-3 px-4 font-mono font-bold text-slate-800 text-xs">{t.id.substring(0, 14)}</td>
+                                                            <td className="py-3 px-4 font-mono font-bold text-slate-800 text-xs">{(t.id || '').substring(0, 14)}</td>
                                                             <td className="py-3 px-4 font-bold text-slate-900 text-xs uppercase">{customer?.name || 'N/A'}</td>
                                                             <td className="py-3 px-4 whitespace-nowrap">
                                                                 <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
@@ -5075,7 +5122,7 @@ const handleExportCriticalStock = () => {
                                                 .filter(item => {
                                                     if (!arSearch) return true;
                                                     const query = arSearch.toLowerCase();
-                                                    return item.customer.name.toLowerCase().includes(query) ||
+                                                    return (item.customer.name || '').toLowerCase().includes(query) ||
                                                         (item.customer.phone && item.customer.phone.toLowerCase().includes(query)) ||
                                                         (item.customer.email && item.customer.email.toLowerCase().includes(query));
                                                 })
@@ -5276,7 +5323,7 @@ const handleExportCriticalStock = () => {
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 text-xs">
                                             {transactions
-                                                .filter(t => t.vendorId === selectedAPVendor.id && t.status !== 'VOID' && t.status !== 'DRAFT' && t.date.split('T')[0] <= apBreakupDetails.endDay)
+                                                .filter(t => t.vendorId === selectedAPVendor.id && t.status !== 'VOID' && t.status !== 'DRAFT' && (t.date || '').split('T')[0] <= apBreakupDetails.endDay)
                                                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                                                 .map(t => {
                                                     const isCreditPurchase = t.type === 'PURCHASE' && (t.paymentMethod === 'CREDIT' || (Number(t.balanceDue) || 0) > 0);
@@ -5319,7 +5366,7 @@ const handleExportCriticalStock = () => {
                                             {transactions
                                                 .filter(t => {
                                                     if (t.status === 'VOID' || t.status === 'DRAFT') return false;
-                                                    const txDate = t.date.split('T')[0];
+                                                    const txDate = (t.date || '').split('T')[0];
                                                     if (txDate > apBreakupDetails.endDay) return false;
 
                                                     const cashierMatch = selectedCashier === 'ALL CASHIERS' || t.branchId === selectedCashier;

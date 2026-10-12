@@ -27,6 +27,8 @@ interface FinanceProps {
    onJumpTo?: (type: 'PO' | 'CUSTOMER' | 'VENDOR' | 'SALE', id: string) => void;
    onLoadMore?: () => void;
    hasMore?: boolean;
+   isLoadingMore?: boolean;
+   onFetchData?: (startDate?: string, endDate?: string) => Promise<void>;
    onAddJournalEntry?: (tx: any) => void;
 }
 
@@ -34,7 +36,7 @@ const Finance: React.FC<FinanceProps> = ({
    accounts = [], transactions = [], daySessions = [], products = [], vendors = [], recurringExpenses = [], customers = [], userProfile,
    onOpenDay, onCloseDay, onAddExpense, onAddTransfer, onUpdateTransaction, onDeleteTransaction,
    onAddRecurring, onDeleteRecurring, onUpsertAccount, onDeleteAccount, onResumeDraft, onJumpTo,
-   onLoadMore, hasMore = false, onAddJournalEntry
+   onLoadMore, hasMore = false, isLoadingMore = false, onFetchData, onAddJournalEntry
 }) => {
    const getTodayLocal = () => {
       const d = new Date();
@@ -434,7 +436,11 @@ const Finance: React.FC<FinanceProps> = ({
                      <input
                         type="date"
                         value={startDate}
-                        onChange={e => setStartDate(e.target.value)}
+                        onChange={e => {
+                           const val = e.target.value;
+                           setStartDate(val);
+                           if (onFetchData) onFetchData(val, endDate);
+                        }}
                         className="px-6 py-3 rounded-2xl border border-slate-200 font-semibold text-sm text-slate-900 outline-none focus:border-slate-400 transition-all bg-white w-48 appearance-none"
                         style={{ backgroundImage: 'url(data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23334155%22 stroke-width=%222%22%3E%3Crect x=%224%22 y=%222%22 width=%2216%22 height=%2216%22 rx=%222%22/%3E%3Cpath d=%22M16 2v4M8 2v4M4 10h16%22/%3E%3C/svg%3E)', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '20px', paddingRight: '40px' }}
                      />
@@ -444,11 +450,31 @@ const Finance: React.FC<FinanceProps> = ({
                      <input
                         type="date"
                         value={endDate}
-                        onChange={e => setEndDate(e.target.value)}
+                        onChange={e => {
+                           const val = e.target.value;
+                           setEndDate(val);
+                           if (onFetchData) onFetchData(startDate, val);
+                        }}
                         className="px-6 py-3 rounded-2xl border border-slate-200 font-semibold text-sm text-slate-900 outline-none focus:border-slate-400 transition-all bg-white w-48 appearance-none"
                         style={{ backgroundImage: 'url(data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2220%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23334155%22 stroke-width=%222%22%3E%3Crect x=%224%22 y=%222%22 width=%2216%22 height=%2216%22 rx=%222%22/%3E%3Cpath d=%22M16 2v4M8 2v4M4 10h16%22/%3E%3C/svg%3E)', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '20px', paddingRight: '40px' }}
                      />
                   </div>
+
+                  {(onFetchData || onLoadMore) && (
+                     <button
+                        type="button"
+                        disabled={isLoadingMore}
+                        onClick={() => {
+                           if (onFetchData) onFetchData(startDate, endDate);
+                           else if (onLoadMore) onLoadMore();
+                        }}
+                        className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase tracking-widest transition-all shadow-md flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+                        title="Fetch all data for selected date range"
+                     >
+                        <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+                        <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+                     </button>
+                  )}
 
                   <button
                      onClick={() => {

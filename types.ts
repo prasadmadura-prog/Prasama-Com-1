@@ -52,6 +52,8 @@ export interface Product {
   variants?: ProductVariant[];
   batches?: ProductBatch[];
   costingMethod?: 'FIFO' | 'WEIGHTED_AVG';
+  reloadCommissionPercent?: number;
+  reloadCostPercent?: number;
 }
 
 export interface Category {

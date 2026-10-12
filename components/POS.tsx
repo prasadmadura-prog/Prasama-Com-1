@@ -5,6 +5,7 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { formatDate } from '../utils/dateFormatter';
 import { findItemOrVariantByBarcode } from '../utils/batchInventoryUtils';
+import { isHotReloadProduct, getReloadCommissionRate, getReloadCostRate } from '../utils/reloadUtils';
 
 interface POSProps {
   products: Product[];
@@ -47,6 +48,16 @@ const POS: React.FC<POSProps> = ({
 
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<any>(null);
+  const [completedSaleToast, setCompletedSaleToast] = useState<{ id: string; amount: number; paymentMethod: string; tx: any } | null>(null);
+
+  useEffect(() => {
+    if (!completedSaleToast) return;
+    const timer = setTimeout(() => {
+      setCompletedSaleToast(null);
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [completedSaleToast]);
+
   const [activeTerminal, setActiveTerminal] = useState(userProfile.branch || 'CASHIER 1'); // State for active terminal
   const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null);
   const completedTxIdsRef = useRef<Set<string>>(new Set());
@@ -181,7 +192,8 @@ const POS: React.FC<POSProps> = ({
 
     const branchStats: Record<string, { revenue: number, profit: number, retailRevenue: number, retailProfit: number }> = {
       'CASHIER 1': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 },
-      'CASHIER 2': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 }
+      'CASHIER 2': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 },
+      'CASHIER 3': { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 }
     };
 
     let totalReloadSales = 0;
@@ -202,12 +214,13 @@ const POS: React.FC<POSProps> = ({
       // 1. Identify Branch
       let branch = (t.branchId || 'CASHIER 1').toUpperCase().trim();
       if (branch === 'LOCAL NODE' || branch === 'BOOKSHOP' || branch === 'SHOP 2' || branch === 'MAIN BRANCH' || branch.includes('KIRULAPANA')) branch = 'CASHIER 1';
-      if (!branchStats[branch]) branchStats[branch] = { revenue: 0, profit: 0 };
+      if (!branchStats[branch]) branchStats[branch] = { revenue: 0, profit: 0, retailRevenue: 0, retailProfit: 0 };
 
       // 2. Calculate Transaction Metrics
       let txRevenue = 0;
       let txProfit = 0;
       let txReloadSales = 0;
+      let txReloadProfit = 0;
 
       if (isSale) {
         if (t.items && t.items.length > 0) {
@@ -215,12 +228,14 @@ const POS: React.FC<POSProps> = ({
             const itemTotal = (Number(item.quantity) * Number(item.price)) - (Number(item.discount) || 0);
             const product = products.find(p => p.id === item.productId);
             const category = categories.find(c => c.id === product?.categoryId);
-            const categoryName = (category?.name || "").toUpperCase();
-            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+            const isHotReload = isHotReloadProduct(product, category, t.description, item.productId);
 
             if (isHotReload) {
+              const commRate = getReloadCommissionRate(product);
+              const reloadMargin = itemTotal * commRate;
               txReloadSales += itemTotal;
-              txProfit += (itemTotal * 0.04);
+              txReloadProfit += reloadMargin;
+              txProfit += reloadMargin;
               txRevenue += itemTotal;
             } else {
               txRevenue += itemTotal;
@@ -231,13 +246,10 @@ const POS: React.FC<POSProps> = ({
         } else {
           // Fallback
           txRevenue = Number(t.amount || 0);
-          // Assume some default margin? Or 0 profit? Let's assume 0 cost if unknown (dangerous but standard fallback)
           txProfit = txRevenue;
         }
       } else if (isPayment) {
         // Credit payment is inflow but not new profit (profit booked at sale)
-        // actually, simpler: Inflow tracks CASH/BANK movements.
-        // Profit tracks SALE performance.
       }
 
       // 3. Accumulate Branch Stats (Sales & Profit only from SALES)
@@ -245,7 +257,7 @@ const POS: React.FC<POSProps> = ({
         branchStats[branch].revenue += txRevenue;
         branchStats[branch].profit += txProfit;
         branchStats[branch].retailRevenue += (txRevenue - txReloadSales);
-        branchStats[branch].retailProfit += (txProfit - (txReloadSales * 0.04));
+        branchStats[branch].retailProfit += (txProfit - txReloadProfit);
         totalReloadSales += txReloadSales;
         globalProfit += txProfit; // This matches sum of branch profits
       }
@@ -502,7 +514,11 @@ const POS: React.FC<POSProps> = ({
     }
 
     const itemPrice = variant ? (Number(variant.price) || Number(product.price)) : Number(product.price);
-    const itemCost = variant ? (Number(variant.cost) || Number(product.cost)) : Number(product.cost);
+    const productCategory = categories.find(c => c.id === product.categoryId);
+    const isReloadItem = isHotReloadProduct(product, productCategory);
+    const itemCost = isReloadItem
+      ? Number((itemPrice * getReloadCostRate(product)).toFixed(4))
+      : (variant ? (Number(variant.cost) || Number(product.cost)) : Number(product.cost));
     const itemVariantId = variant?.id;
     const itemSize = variant?.size;
 
@@ -570,11 +586,18 @@ const POS: React.FC<POSProps> = ({
   const updateLinePrice = (id: string, newPrice: number, variantId?: string) => {
     setPosSession((prev: POSSession) => ({
       ...prev,
-      cart: prev.cart.map((item: any) => 
-        (item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId)) 
-          ? { ...item, price: newPrice } 
-          : item
-      )
+      cart: prev.cart.map((item: any) => {
+        if (item.product.id === id && (variantId ? item.variantId === variantId : !item.variantId)) {
+          const itemCategory = categories.find(c => c.id === item.product?.categoryId);
+          const isReloadItem = isHotReloadProduct(item.product, itemCategory);
+          return {
+            ...item,
+            price: newPrice,
+            costBasis: isReloadItem ? Number((newPrice * getReloadCostRate(item.product)).toFixed(4)) : item.costBasis
+          };
+        }
+        return item;
+      })
     }));
   };
 
@@ -608,8 +631,8 @@ const POS: React.FC<POSProps> = ({
     const targetName = `RELOAD ${provider}`;
     const existingProduct = products.find(p => p.name === targetName);
 
-    // 4% Profit Margin Logic for digital reloads: Cost is 96% of the Sales Price
-    const costPrice = amount * 0.96;
+    // Provider percentage-based cost calculation for digital reloads
+    const costPrice = Number((amount * getReloadCostRate(existingProduct)).toFixed(4));
 
     const reloadProduct: Product = existingProduct ? {
       ...existingProduct,
@@ -711,113 +734,17 @@ const POS: React.FC<POSProps> = ({
     return () => clearTimeout(timer);
   }, [cart, discount, discountPercent, paymentMethod, accountId, posSession.selectedPOSCustomerId, currentDraftId, activeTerminal, onSaveDraftSale, globalDiscountType]);
 
-  const completeTransaction = async (customerId?: string) => {
-    if (isProcessing) return;
-    setIsProcessing(true);
-    // MUST use the existing Draft ID to promote DRAFT → COMPLETED status
-    const txId = currentDraftId || `TX-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-    completedTxIdsRef.current.add(txId);
-
-    const effectivePaidAmount = isAdvance ? advanceAmount : (paymentMethod === 'CREDIT' ? 0 : totals.finalTotal);
-    const effectiveBalanceDue = isAdvance ? (totals.finalTotal - (advanceAmount || 0)) : (paymentMethod === 'CREDIT' ? totals.finalTotal : 0);
-
-    const txCostBasis = cart.reduce((acc, item) => acc + (item.costBasis ?? item.product.cost ?? 0) * item.qty, 0);
-    const txPayload = {
-      id: txId,
-      type: 'SALE' as const,
-      status: 'COMPLETED' as const,
-      branchId: activeTerminal, // Enforce selected terminal
-      amount: totals.finalTotal,
-      paidAmount: effectivePaidAmount,
-      balanceDue: effectiveBalanceDue,
-      discount: totals.lineSavings + totals.globalDiscountAmt,
-      paymentMethod,
-      accountId: (paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') ? accountId : 'cash',
-      customerId: customerId || (posSession.selectedPOSCustomerId !== 'WALKING' ? posSession.selectedPOSCustomerId : undefined),
-      description: isAdvance ? `Advance Sale: Rs. ${effectivePaidAmount} Paid` : `Sale: ${cart.length} SKUs`,
-      date: txDate ? (txDate + 'T' + new Date().toTimeString().split(' ')[0]) : (getTodayLocal() + 'T' + new Date().toTimeString().split(' ')[0]),
-      chequeNumber: paymentMethod === 'CHEQUE' ? chequeNumber : undefined,
-      chequeDate: paymentMethod === 'CHEQUE' ? chequeDate : undefined,
-      costBasis: txCostBasis,
-      cashReceived: paymentMethod === 'CASH' ? (parseFloat(cashReceived) || totals.finalTotal) : undefined,
-      changeGiven: paymentMethod === 'CASH' ? changeDue : undefined,
-      items: cart.map(i => {
-        const itemGross = i.qty * i.price;
-        const itemDiscount = i.discountType === 'PCT' ? (itemGross * i.discount) / 100 : i.discount;
-        return {
-          productId: i.product.id,
-          quantity: i.qty,
-          price: i.price,
-          discount: itemDiscount,
-          variantId: i.variantId,
-          size: i.selectedSize,
-          costBasis: i.costBasis
-        };
-      })
-    };
-
-    try {
-      await onCompleteSale(txPayload);
-      setLastTx({ ...txPayload, subtotal: totals.gross, total: totals.finalTotal, globalDiscount: totals.globalDiscountAmt });
-
-      setPosSession({
-        cart: [],
-        discount: 0,
-        discountPercent: 0,
-        globalDiscountType: 'AMT',
-        paymentMethod: 'CASH',
-        accountId: 'cash',
-        search: '',
-        categoryId: 'All',
-        chequeNumber: '',
-        chequeDate: getTodayLocal(),
-        isAdvance: false,
-        advanceAmount: 0,
-        selectedPOSCustomerId: 'WALKING',
-        transactionId: undefined,
-        transactionDate: undefined
-      });
-      setCurrentDraftId(null); // Clear draft ID
-      setShowCustomerModal(false);
-      setShowCashModal(false);
-      setShowGlobalDiscountEdit(false);
-      setCashReceived('');
-    } catch (err) {
-      console.error("Sale completion failed:", err);
-    } finally {
-      setIsProcessing(false);
+  const printReceipt = (tx: any, existingWindow?: Window | null) => {
+    let printWindow = existingWindow && !existingWindow.closed ? existingWindow : null;
+    if (!printWindow) {
+      try {
+        printWindow = window.open('', '_blank');
+      } catch (e) {
+        console.warn("Could not open print window:", e);
+      }
     }
-  };
-
-  const handleRegisterNewCustomer = () => {
-    if (!newCusName.trim()) return;
-    const newCustomer: Customer = {
-      id: `CUS-${Date.now()}`,
-      name: newCusName.toUpperCase(),
-      phone: newCusPhone,
-      email: '',
-      address: '',
-      totalCredit: 0,
-      creditLimit: parseFloat(newCusLimit) || 50000
-    };
-    onUpsertCustomer(newCustomer);
-    
-    // Select the new customer in the current session
-    setPosSession(prev => ({ ...prev, selectedPOSCustomerId: newCustomer.id }));
-    
-    // Close modals
-    setShowCustomerModal(false);
-    setIsAddingCustomer(false);
-    setNewCusName('');
-    setNewCusPhone('');
-    
-    // If the user was specifically finalizing a credit/advance sale, they can now just click Authorize again.
-    // Or we could trigger it, but safer to let them review.
-  };
-
-  const printReceipt = (tx: any) => {
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
+
     const logoHtml = userProfile.logo
       ? `<div style="text-align: center; margin-bottom: 5px; width: 100%;">
            <img src="${userProfile.logo}" style="max-height: 55px; max-width: 100%; filter: grayscale(100%);" />
@@ -842,6 +769,7 @@ const POS: React.FC<POSProps> = ({
     const timeStr = new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const grossTotalValue = Number(tx.amount) + Number(tx.discount);
 
+    printWindow.document.open();
     printWindow.document.write(`
       <html>
         <head>
@@ -952,20 +880,6 @@ const POS: React.FC<POSProps> = ({
     printWindow.document.close();
   };
 
-  if (!isDayOpen) {
-    return (
-      <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center">
-        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl mb-6">🔒</div>
-        <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Terminal Offline</h2>
-        <p className="text-slate-400 text-sm mt-1 mb-8">Daily cash balance must be initialized before processing sales.</p>
-        <button onClick={() => {
-          const balance = prompt(`Opening Float for ${activeTerminal} (Rs.):`, "0");
-          if (balance !== null) onQuickOpenDay(parseFloat(balance) || 0, activeTerminal);
-        }} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all">Initialize Float ({activeTerminal})</button>
-      </div>
-    );
-  }
-
   const shareInvoice = (tx: any, platform: 'SMS' | 'WHATSAPP') => {
     const customer = customers.find(c => c.id === tx.customerId);
     const phone = customer?.phone || '';
@@ -1047,58 +961,202 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
     }
   };
 
-  if (lastTx) {
+  const completeTransaction = async (customerId?: string) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    // MUST use the existing Draft ID to promote DRAFT → COMPLETED status
+    const txId = currentDraftId || `TX-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
+    completedTxIdsRef.current.add(txId);
+
+    const effectivePaidAmount = isAdvance ? advanceAmount : (paymentMethod === 'CREDIT' ? 0 : totals.finalTotal);
+    const effectiveBalanceDue = isAdvance ? (totals.finalTotal - (advanceAmount || 0)) : (paymentMethod === 'CREDIT' ? totals.finalTotal : 0);
+
+    const txCostBasis = cart.reduce((acc, item) => acc + (item.costBasis ?? item.product.cost ?? 0) * item.qty, 0);
+    const txPayload = {
+      id: txId,
+      type: 'SALE' as const,
+      status: 'COMPLETED' as const,
+      branchId: activeTerminal, // Enforce selected terminal
+      amount: totals.finalTotal,
+      paidAmount: effectivePaidAmount,
+      balanceDue: effectiveBalanceDue,
+      discount: totals.lineSavings + totals.globalDiscountAmt,
+      paymentMethod,
+      accountId: (paymentMethod === 'BANK' || paymentMethod === 'CARD' || paymentMethod === 'CHEQUE') ? accountId : 'cash',
+      customerId: customerId || (posSession.selectedPOSCustomerId !== 'WALKING' ? posSession.selectedPOSCustomerId : undefined),
+      description: isAdvance ? `Advance Sale: Rs. ${effectivePaidAmount} Paid` : `Sale: ${cart.length} SKUs`,
+      date: txDate ? (txDate + 'T' + new Date().toTimeString().split(' ')[0]) : (getTodayLocal() + 'T' + new Date().toTimeString().split(' ')[0]),
+      chequeNumber: paymentMethod === 'CHEQUE' ? chequeNumber : undefined,
+      chequeDate: paymentMethod === 'CHEQUE' ? chequeDate : undefined,
+      costBasis: txCostBasis,
+      cashReceived: paymentMethod === 'CASH' ? (parseFloat(cashReceived) || totals.finalTotal) : undefined,
+      changeGiven: paymentMethod === 'CASH' ? changeDue : undefined,
+      items: cart.map(i => {
+        const itemGross = i.qty * i.price;
+        const itemDiscount = i.discountType === 'PCT' ? (itemGross * i.discount) / 100 : i.discount;
+        return {
+          productId: i.product.id,
+          quantity: i.qty,
+          price: i.price,
+          discount: itemDiscount,
+          variantId: i.variantId,
+          size: i.selectedSize,
+          costBasis: i.costBasis
+        };
+      })
+    };
+
+    // Pre-open print window synchronously within user-click gesture to avoid browser popup blockers
+    let printWindow: Window | null = null;
+    try {
+      printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <html>
+            <head><title>Printing Receipt...</title></head>
+            <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;color:#555;background:#f8fafc;">
+              <p style="font-size:13px;font-weight:bold;">Preparing receipt, printing will start shortly...</p>
+            </body>
+          </html>
+        `);
+      }
+    } catch (e) {
+      console.warn("Pre-opening print window failed:", e);
+    }
+
+    try {
+      await onCompleteSale(txPayload);
+      const fullTxForReceipt = {
+        ...txPayload,
+        subtotal: totals.gross,
+        total: totals.finalTotal,
+        globalDiscount: totals.globalDiscountAmt
+      };
+
+      // Automatically trigger receipt print in the opened window
+      printReceipt(fullTxForReceipt, printWindow);
+
+      // Immediately reset POS session for the next sale (fresh blank invoice ready)
+      setPosSession({
+        cart: [],
+        discount: 0,
+        discountPercent: 0,
+        globalDiscountType: 'AMT',
+        paymentMethod: 'CASH',
+        accountId: 'cash',
+        search: '',
+        categoryId: 'All',
+        chequeNumber: '',
+        chequeDate: getTodayLocal(),
+        isAdvance: false,
+        advanceAmount: 0,
+        selectedPOSCustomerId: 'WALKING',
+        transactionId: undefined,
+        transactionDate: undefined
+      });
+      setCurrentDraftId(null); // Clear draft ID
+      setShowCustomerModal(false);
+      setShowCashModal(false);
+      setShowGlobalDiscountEdit(false);
+      setCashReceived('');
+      setLastTx(null); // Never block the POS screen! Keep the fresh new sale open!
+
+      // Show non-blocking floating notification with reprint & WhatsApp options
+      setCompletedSaleToast({
+        id: txId,
+        amount: totals.finalTotal,
+        paymentMethod,
+        tx: fullTxForReceipt
+      });
+    } catch (err) {
+      if (printWindow && !printWindow.closed) {
+        printWindow.close();
+      }
+      console.error("Sale completion failed:", err);
+      alert("Failed to complete sale. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRegisterNewCustomer = () => {
+    if (!newCusName.trim()) return;
+    const newCustomer: Customer = {
+      id: `CUS-${Date.now()}`,
+      name: newCusName.toUpperCase(),
+      phone: newCusPhone,
+      email: '',
+      address: '',
+      totalCredit: 0,
+      creditLimit: parseFloat(newCusLimit) || 50000
+    };
+    onUpsertCustomer(newCustomer);
+    
+    // Select the new customer in the current session
+    setPosSession(prev => ({ ...prev, selectedPOSCustomerId: newCustomer.id }));
+    
+    // Close modals
+    setShowCustomerModal(false);
+    setIsAddingCustomer(false);
+    setNewCusName('');
+    setNewCusPhone('');
+    
+    // If the user was specifically finalizing a credit/advance sale, they can now just click Authorize again.
+    // Or we could trigger it, but safer to let them review.
+  };
+
+  if (!isDayOpen) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg p-12 text-center space-y-8 animate-in zoom-in duration-300">
-          <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto shadow-inner">✓</div>
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 uppercase tracking-tighter">Checkout Successful</h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 font-mono">Ref: {lastTx.id}</p>
-          </div>
-          
-          <div className="bg-slate-50 rounded-[2rem] p-6 border border-slate-100 space-y-4">
-            <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
-              <span>Customer</span>
-              <span className="text-slate-900">{customers.find(c => c.id === lastTx.customerId)?.name || 'Walk-in'}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Net Total</span>
-              <span className="text-2xl font-black font-mono text-slate-900">Rs. {Number(lastTx.total || lastTx.amount).toLocaleString()}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <button onClick={() => setLastTx(null)} className="bg-slate-900 text-white py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl hover:bg-black transition-all active:scale-95">New Sale</button>
-            <button onClick={() => printReceipt(lastTx)} className="bg-indigo-600 text-white py-4 rounded-2xl font-bold text-[10px] uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all active:scale-95">🖨️ Print Receipt</button>
-          </div>
-
-          <div className="h-px bg-slate-100 mx-10"></div>
-
-          <div className="space-y-3">
-             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic">Instant Digital Share</p>
-             <div className="grid grid-cols-2 gap-3">
-                <button 
-                  onClick={() => shareInvoice(lastTx, 'SMS')}
-                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-blue-200 bg-blue-50 text-blue-600 font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all active:scale-95"
-                >
-                  <span>💬</span> SMS Invoice
-                </button>
-                <button 
-                  onClick={() => shareInvoice(lastTx, 'WHATSAPP')}
-                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition-all active:scale-95"
-                >
-                  <span>📱</span> WhatsApp
-                </button>
-             </div>
-          </div>
-        </div>
+      <div className="h-[60vh] flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center">
+        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-2xl mb-6">🔒</div>
+        <h2 className="text-xl font-bold text-slate-900 uppercase tracking-tight">Terminal Offline</h2>
+        <p className="text-slate-400 text-sm mt-1 mb-8">Daily cash balance must be initialized before processing sales.</p>
+        <button onClick={() => {
+          const balance = prompt(`Opening Float for ${activeTerminal} (Rs.):`, "0");
+          if (balance !== null) onQuickOpenDay(parseFloat(balance) || 0, activeTerminal);
+        }} className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all">Initialize Float ({activeTerminal})</button>
       </div>
     );
   }
 
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col gap-3">
+    <div className="h-[calc(100vh-6rem)] flex flex-col gap-3 relative">
+      {/* Floating non-blocking completed sale toast */}
+      {completedSaleToast && (
+        <div className="fixed top-6 right-6 z-[200] bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-top duration-300">
+          <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-sm">✓</div>
+          <div>
+            <div className="text-xs font-black uppercase tracking-wider text-slate-100">
+              Sale Completed: #{completedSaleToast.id}
+            </div>
+            <div className="text-[11px] font-bold text-slate-400">
+              Rs. {completedSaleToast.amount.toLocaleString()} ({completedSaleToast.paymentMethod}) • Print Window Opened
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              onClick={() => printReceipt(completedSaleToast.tx)}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+              title="Reprint Receipt"
+            >
+              🖨️ Reprint
+            </button>
+            <button
+              onClick={() => shareInvoice(completedSaleToast.tx, 'WHATSAPP')}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+              title="Share on WhatsApp"
+            >
+              📱 WhatsApp
+            </button>
+            <button
+              onClick={() => setCompletedSaleToast(null)}
+              className="text-slate-400 hover:text-white text-lg font-bold px-1.5 leading-none cursor-pointer"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <div className="flex gap-2 flex-1 max-w-3xl">
           <div className="relative flex-[2]">
@@ -1159,6 +1217,8 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
                   <>
                     <option value="CASHIER 1">CASHIER 1</option>
                     <option value="CASHIER 2">CASHIER 2</option>
+                    <option value="CASHIER 3">CASHIER 3</option>
+                    <option value="CASHIER 4">CASHIER 4</option>
                   </>
                 )}
             </select>
@@ -1209,21 +1269,18 @@ ${center('~~~Thank You~~~', width)}\`\`\``;
             <p className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">Net Profit</p>
           </div>
 
-          {/* RELOAD SALES */}
-          {(userProfile.isAdmin || userProfile.loginUsername !== 'madupathirana95@gmail.com') && (
-            <>
-              <div className="w-px h-8 bg-slate-100"></div>
-              <div className="text-right flex flex-col items-end justify-center h-full">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">
-                  Reload Sales (Rs. {Math.round(dailySummary.reloadSales || 0).toLocaleString()})
-                </p>
-                <p className="text-lg font-black font-mono text-indigo-600 leading-none mb-0.5">
-                  Rs. {Math.round((dailySummary.reloadSales || 0) * 0.04).toLocaleString()}
-                </p>
-                <p className="text-[7px] font-black text-indigo-500 uppercase tracking-widest">Net Profit</p>
-              </div>
-            </>
-          )}
+          <div className="w-px h-8 bg-slate-100"></div>
+
+          {/* CASHIER 3 */}
+          <div className="text-right flex flex-col items-end justify-center h-full">
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-tight">
+              CASHIER 3 (Rs. {Math.round(dailySummary.branchStats['CASHIER 3']?.retailRevenue || 0).toLocaleString()})
+            </p>
+            <p className="text-lg font-black font-mono text-emerald-600 leading-none mb-0.5">
+              Rs. {Math.round(dailySummary.branchStats['CASHIER 3']?.retailProfit || 0).toLocaleString()}
+            </p>
+            <p className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">Net Profit</p>
+          </div>
         </div>
       </div>
 

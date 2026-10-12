@@ -116,6 +116,96 @@ export function selectFields(data: any, fields: string[]): any {
   return projected;
 }
 
+export function normalizeDocument(collectionName: string, docData: any): any {
+  if (!docData) return docData;
+  const baseId = typeof docData.id === 'string' ? docData.id : String(docData.id ?? '');
+
+  if (collectionName === collections.transactions) {
+    const rawDate = docData.date || docData.createdAt || docData.updatedAt || '';
+    const dateStr = typeof rawDate === 'string' && rawDate
+      ? rawDate
+      : (rawDate && typeof rawDate.toDate === 'function'
+        ? rawDate.toDate().toISOString()
+        : '1970-01-01T00:00:00');
+    return {
+      ...docData,
+      id: baseId,
+      date: dateStr,
+      description: typeof docData.description === 'string' ? docData.description : String(docData.description ?? ''),
+      category: typeof docData.category === 'string' ? docData.category : (docData.category != null ? String(docData.category) : undefined),
+      mainCategory: typeof docData.mainCategory === 'string' ? docData.mainCategory : (docData.mainCategory != null ? String(docData.mainCategory) : undefined),
+      chequeDate: typeof docData.chequeDate === 'string' ? docData.chequeDate : (docData.chequeDate != null ? String(docData.chequeDate) : undefined),
+      updatedAt: typeof docData.updatedAt === 'string' ? docData.updatedAt : (docData.updatedAt != null ? String(docData.updatedAt) : undefined),
+      items: Array.isArray(docData.items)
+        ? docData.items.filter(Boolean).map((item: any) => ({
+            ...item,
+            productId: typeof item.productId === 'string' ? item.productId : String(item.productId ?? ''),
+          }))
+        : docData.items,
+    };
+  }
+
+  if (collectionName === collections.purchaseOrders) {
+    const rawDate = docData.date || docData.createdAt || '';
+    const dateStr = typeof rawDate === 'string' && rawDate
+      ? rawDate
+      : (rawDate && typeof rawDate.toDate === 'function'
+        ? rawDate.toDate().toISOString()
+        : '1970-01-01');
+    return {
+      ...docData,
+      id: baseId,
+      date: dateStr,
+      chequeDate: typeof docData.chequeDate === 'string' ? docData.chequeDate : (docData.chequeDate != null ? String(docData.chequeDate) : undefined),
+      items: Array.isArray(docData.items)
+        ? docData.items.filter(Boolean).map((item: any) => ({
+            ...item,
+            productId: typeof item.productId === 'string' ? item.productId : String(item.productId ?? ''),
+            productName: typeof item.productName === 'string' ? item.productName : String(item.productName ?? ''),
+            productSku: typeof item.productSku === 'string' ? item.productSku : String(item.productSku ?? ''),
+          }))
+        : [],
+    };
+  }
+
+  if (collectionName === collections.products) {
+    return {
+      ...docData,
+      id: baseId,
+      name: typeof docData.name === 'string' ? docData.name : String(docData.name ?? ''),
+      sku: typeof docData.sku === 'string' ? docData.sku : String(docData.sku ?? ''),
+      categoryId: typeof docData.categoryId === 'string' ? docData.categoryId : String(docData.categoryId ?? ''),
+    };
+  }
+
+  if (
+    collectionName === collections.vendors ||
+    collectionName === collections.customers ||
+    collectionName === collections.accounts ||
+    collectionName === collections.categories
+  ) {
+    return {
+      ...docData,
+      id: baseId,
+      name: typeof docData.name === 'string' ? docData.name : String(docData.name ?? ''),
+    };
+  }
+
+  if (collectionName === collections.fixedAssets) {
+    return {
+      ...docData,
+      id: baseId,
+      name: typeof docData.name === 'string' ? docData.name : String(docData.name ?? ''),
+      purchaseDate: typeof docData.purchaseDate === 'string' && docData.purchaseDate ? docData.purchaseDate : '1970-01-01',
+    };
+  }
+
+  return {
+    ...docData,
+    id: baseId,
+  };
+}
+
 export function subscribeToCollection(
   collectionName: string, 
   callback: (data: any[]) => void,
@@ -127,7 +217,7 @@ export function subscribeToCollection(
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const data: any[] = [];
     querySnapshot.forEach((doc) => {
-      const docData = { ...doc.data(), id: doc.id };
+      const docData = normalizeDocument(collectionName, { ...doc.data(), id: doc.id });
       data.push(fields ? selectFields(docData, fields) : docData);
     });
     callback(data);
@@ -155,7 +245,7 @@ export function subscribeToCollectionWithLimit(
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const data: any[] = [];
     querySnapshot.forEach((doc) => {
-      const docData = { ...doc.data(), id: doc.id };
+      const docData = normalizeDocument(collectionName, { ...doc.data(), id: doc.id });
       data.push(fields ? selectFields(docData, fields) : docData);
     });
     callback(data);
@@ -165,6 +255,31 @@ export function subscribeToCollectionWithLimit(
   });
 
   return unsubscribe;
+}
+
+export async function fetchTransactionsByDateRange(
+  startDate: string,
+  endDate: string,
+  limitCount?: number
+): Promise<any[]> {
+  try {
+    const startStr = startDate.includes('T') ? startDate : `${startDate}T00:00:00`;
+    const endStr = endDate.includes('T') ? endDate : `${endDate}T23:59:59`;
+    let q = query(
+      collection(db, collections.transactions),
+      where('date', '>=', startStr),
+      where('date', '<=', endStr),
+      firestoreOrderBy('date', 'desc')
+    );
+    if (limitCount) {
+      q = query(q, firestoreLimit(limitCount));
+    }
+    const snap = await getDocs(q);
+    return snap.docs.map(doc => normalizeDocument(collections.transactions, { ...doc.data(), id: doc.id }));
+  } catch (err) {
+    console.error('Error fetching transactions by date range:', err);
+    return [];
+  }
 }
 
 export async function getDocsFromCacheOrServer(
@@ -186,7 +301,7 @@ export async function getDocsFromCacheOrServer(
     if (!snapshot.empty) {
       console.log(`Retrieved ${snapshot.size} docs from cache for ${collectionName}`);
       return snapshot.docs.map(doc => {
-        const docData = { ...doc.data(), id: doc.id };
+        const docData = normalizeDocument(collectionName, { ...doc.data(), id: doc.id });
         return fields ? selectFields(docData, fields) : docData;
       });
     }
@@ -196,7 +311,7 @@ export async function getDocsFromCacheOrServer(
 
   const snapshot = await getDocsFromServer(q);
   return snapshot.docs.map(doc => {
-    const docData = { ...doc.data(), id: doc.id };
+    const docData = normalizeDocument(collectionName, { ...doc.data(), id: doc.id });
     return fields ? selectFields(docData, fields) : docData;
   });
 }

@@ -14,9 +14,10 @@ interface CustomersProps {
   clearJump?: () => void;
   onLoadMore?: () => void;
   hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
-const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts, products, onUpsertCustomer, onReceivePayment, onUpdateTransaction, onDeleteTransaction, jumpTarget, clearJump, onLoadMore, hasMore = false }) => {
+const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts, products, onUpsertCustomer, onReceivePayment, onUpdateTransaction, onDeleteTransaction, jumpTarget, clearJump, onLoadMore, hasMore = false, isLoadingMore = false }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -648,7 +649,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, transactions, accounts
                   <p className="text-[14px] font-black text-indigo-600 uppercase tracking-[0.1em] mt-1">{selectedForHistory.phone || '+94 XX XXX XXXX'}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-12">
+              <div className="flex items-center gap-6">
+                {onLoadMore && (
+                  <button
+                    type="button"
+                    disabled={isLoadingMore}
+                    onClick={() => onLoadMore()}
+                    className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+                    title="Fetch all historical transactions"
+                  >
+                    <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+                    <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+                  </button>
+                )}
                 <div className="text-right">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Exposure Aggregate</p>
                   <p className={`text-4xl font-black tracking-tighter leading-none ${exposureAggregate < 0 ? (Math.abs(exposureAggregate) > (selectedForHistory.creditLimit || 0) ? 'text-rose-600' : 'text-indigo-600') : exposureAggregate > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>Rs. {Number(exposureAggregate).toLocaleString()}</p>

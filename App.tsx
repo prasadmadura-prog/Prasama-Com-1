@@ -6,6 +6,7 @@ import {
   upsertDocument,
   deleteDocument,
   bulkUpsert,
+  fetchTransactionsByDateRange,
   collections as dbCols
 } from './services/database';
 import { View, Product, Transaction, BankAccount, PurchaseOrder, Vendor, Customer, UserProfile, Category, RecurringExpense, DaySession, POSSession, POStatus, Quotation, FixedAsset } from './types';
@@ -30,6 +31,7 @@ import FixedAssets from './components/FixedAssets';
 import AccountingLiabilities from './components/AccountingLiabilities';
 import Reports from './components/Reports';
 import { applyPurchaseToProduct, applySaleDeductionToProduct, recalculateProductSummary, ensureProductBatches } from './utils/batchInventoryUtils';
+import { isHotReloadProduct, getReloadCostRate } from './utils/reloadUtils';
 
 const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
@@ -52,6 +54,8 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
 
   const [transactionsLimit, setTransactionsLimit] = useState(100);
+  const [fetchAllTransactions, setFetchAllTransactions] = useState(false);
+  const [isFetchingAllTransactions, setIsFetchingAllTransactions] = useState(false);
   const [productsLimit, setProductsLimit] = useState(100);
   const [customersLimit, setCustomersLimit] = useState(100);
   const [purchaseOrdersLimit, setPurchaseOrdersLimit] = useState(100);
@@ -229,8 +233,10 @@ const App: React.FC = () => {
     return () => unsub();
   }, []);
 
+  const isLoggedIn = !isLoading && currentView !== 'LOGIN';
+
   useEffect(() => {
-    if (currentView === 'LOGIN' || isLoading) return;
+    if (!isLoggedIn) return;
 
     const unsubscribes: (() => void)[] = [];
 
@@ -254,57 +260,44 @@ const App: React.FC = () => {
       })
     );
 
-    // 2. Load collections based on active view to optimize Firestore reads
-    const needsProducts = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'INVENTORY', 'FINANCE', 'CUSTOMERS', 'BARCODE_PRINT', 'REPORTS', 'PURCHASES', 'RELOAD', 'ACCOUNTING'].includes(currentView);
-    const needsCategories = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'INVENTORY', 'BARCODE_PRINT', 'PURCHASES', 'RELOAD', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
-    const needsTransactions = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'PURCHASES', 'RELOAD', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
-    const needsAccounts = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'PURCHASES', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
-    const needsVendors = ['DASHBOARD', 'KPI', 'INVENTORY', 'FINANCE', 'REPORTS', 'CHEQUE_PRINT', 'PURCHASES', 'ACCOUNTING', 'ACCOUNTING_LIABILITIES'].includes(currentView);
-    const needsCustomers = ['DASHBOARD', 'KPI', 'POS', 'QUOTATIONS', 'SALES_HISTORY', 'FINANCE', 'CUSTOMERS', 'REPORTS', 'RELOAD', 'ACCOUNTING'].includes(currentView);
-    const needsRecurringExpenses = ['FINANCE'].includes(currentView);
-    const needsDaySessions = ['DASHBOARD', 'KPI', 'POS', 'SALES_HISTORY', 'FINANCE', 'ACCOUNTING'].includes(currentView);
-    const needsPurchaseOrders = ['DASHBOARD', 'KPI', 'SALES_HISTORY', 'PURCHASES', 'ACCOUNTING', 'CHEQUE_PRINT'].includes(currentView);
-    const needsQuotations = ['QUOTATIONS'].includes(currentView);
-    const needsFixedAssets = ['DASHBOARD', 'REPORTS', 'ACCOUNTING', 'FIXED_ASSETS'].includes(currentView);
-
-    if (needsProducts) {
-      unsubscribes.push(subscribeToCollection(dbCols.products, (data) => setProducts(data as Product[])));
-    }
-    if (needsCategories) {
-      unsubscribes.push(subscribeToCollection(dbCols.categories, (data) => setCategories(data as Category[])));
-    }
-    if (needsTransactions) {
-      unsubscribes.push(subscribeToCollection(dbCols.transactions, (data) => setTransactions(data as Transaction[])));
-    }
-    if (needsAccounts) {
-      unsubscribes.push(subscribeToCollection(dbCols.accounts, (data) => setAccounts(data as BankAccount[])));
-    }
-    if (needsVendors) {
-      unsubscribes.push(subscribeToCollection(dbCols.vendors, (data) => setVendors(data as Vendor[])));
-    }
-    if (needsCustomers) {
-      unsubscribes.push(subscribeToCollection(dbCols.customers, (data) => setCustomers(data as Customer[])));
-    }
-    if (needsRecurringExpenses) {
-      unsubscribes.push(subscribeToCollection(dbCols.recurringExpenses, (data) => setRecurringExpenses(data as RecurringExpense[])));
-    }
-    if (needsDaySessions) {
-      unsubscribes.push(subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])));
-    }
-    if (needsPurchaseOrders) {
-      unsubscribes.push(
-        subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[]))
-      );
-    }
-    if (needsQuotations) {
-      unsubscribes.push(subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])));
-    }
-    if (needsFixedAssets) {
-      unsubscribes.push(subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])));
-    }
+    // 2. Persistent subscriptions: subscribe once per session to prevent repeated reads on tab switches
+    unsubscribes.push(subscribeToCollection(dbCols.products, (data) => setProducts(data as Product[])));
+    unsubscribes.push(subscribeToCollection(dbCols.categories, (data) => setCategories(data as Category[])));
+    unsubscribes.push(subscribeToCollection(dbCols.accounts, (data) => setAccounts(data as BankAccount[])));
+    unsubscribes.push(subscribeToCollection(dbCols.vendors, (data) => setVendors(data as Vendor[])));
+    unsubscribes.push(subscribeToCollection(dbCols.customers, (data) => setCustomers(data as Customer[])));
+    unsubscribes.push(subscribeToCollection(dbCols.recurringExpenses, (data) => setRecurringExpenses(data as RecurringExpense[])));
+    unsubscribes.push(subscribeToCollection(dbCols.daySessions, (data) => setDaySessions(data as DaySession[])));
+    unsubscribes.push(subscribeToCollection(dbCols.purchaseOrders, (data) => setPurchaseOrders(data as PurchaseOrder[])));
+    unsubscribes.push(subscribeToCollection(dbCols.quotations, (data) => setQuotations(data as Quotation[])));
+    unsubscribes.push(subscribeToCollection(dbCols.fixedAssets, (data) => setFixedAssets(data as FixedAsset[])));
 
     return () => unsubscribes.forEach(unsub => unsub());
-  }, [currentView, isLoading, transactionsLimit, productsLimit, customersLimit, purchaseOrdersLimit]);
+  }, [isLoggedIn]);
+
+  // 3. Optimized transactions subscription: load limited batch initially, or all documents once requested
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (fetchAllTransactions) {
+      setIsFetchingAllTransactions(true);
+      const unsub = subscribeToCollection(
+        dbCols.transactions,
+        (data) => {
+          const sorted = (data as Transaction[]).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          setTransactions(sorted);
+          setIsFetchingAllTransactions(false);
+        }
+      );
+      return () => unsub();
+    }
+    const unsub = subscribeToCollectionWithLimit(
+      dbCols.transactions,
+      transactionsLimit,
+      'date',
+      (data) => setTransactions(data as Transaction[])
+    );
+    return () => unsub();
+  }, [isLoggedIn, transactionsLimit, fetchAllTransactions]);
 
   const handleLogout = () => {
     localStorage.removeItem('prasama_local_auth');
@@ -342,10 +335,9 @@ const App: React.FC = () => {
     let costBasis = (partialTx.items || []).reduce((acc: number, item: any) => {
       const product = products.find(p => p.id === item.productId);
       const productCategory = categories.find(c => c.id === product?.categoryId);
-      const categoryName = (productCategory?.name || '').toUpperCase();
-      const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+      const isHotReload = isHotReloadProduct(product, productCategory, partialTx.description, item.productId);
       let itemCost = Number(product?.cost || 0);
-      if (isHotReload && itemCost === 0) itemCost = Number(item.price) * 0.96;
+      if (isHotReload) itemCost = Number(item.price) * getReloadCostRate(product);
       return acc + (itemCost * Number(item.quantity));
     }, 0);
 
@@ -391,16 +383,15 @@ const App: React.FC = () => {
       let costBasis = (tx.items || []).reduce((acc, item) => {
         const product = products.find(p => p.id === item.productId);
         const productCategory = categories.find(c => c.id === product?.categoryId);
-        const categoryName = (productCategory?.name || '').toUpperCase();
-        const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+        const isHotReload = isHotReloadProduct(product, productCategory, tx.description, item.productId);
 
         let itemCost = item.costBasis !== undefined ? Number(item.costBasis) : (
           item.variantId 
             ? (Number(product?.variants?.find(v => v.id === item.variantId)?.cost) || Number(product?.cost || 0))
             : Number(product?.cost || 0)
         );
-        if (isHotReload && itemCost === 0) {
-          itemCost = Number(item.price) * 0.96; 
+        if (isHotReload) {
+          itemCost = Number(item.price) * getReloadCostRate(product); 
         }
 
         return acc + (itemCost * Number(item.quantity));
@@ -448,13 +439,12 @@ const App: React.FC = () => {
           const product = products.find(p => p.id === item.productId);
           if (product) {
             const productCategory = categories.find(c => c.id === product.categoryId);
-            const categoryName = (productCategory?.name || '').toUpperCase();
-            const isHotReload = categoryName.includes('RELOAD') && !categoryName.includes('CARD');
+            const isHotReload = isHotReloadProduct(product, productCategory, tx.description, item.productId);
 
             if (isHotReload) {
               const bStocks = { ...(product.branchStocks || {}) };
               const currentStock = bStocks[stockBranch] !== undefined ? bStocks[stockBranch] : product.stock;
-              const quantityToDeduct = Number(item.price) * Number(item.quantity) * 0.96;
+              const quantityToDeduct = Number(item.price) * Number(item.quantity) * getReloadCostRate(product);
               const updatedStock = Number(currentStock) - quantityToDeduct;
               bStocks[stockBranch] = updatedStock;
               const updatedProduct = {
@@ -1490,6 +1480,29 @@ const App: React.FC = () => {
   // Global visibility for History and Dashboard
   const branchFilteredTransactions = transactions;
 
+  const handleQueryDateRange = async (start?: string, end?: string) => {
+    const wasAlreadyFetchingAll = fetchAllTransactions;
+    if (!wasAlreadyFetchingAll) {
+      setIsFetchingAllTransactions(true);
+      setFetchAllTransactions(true);
+    }
+    try {
+      if (start || end) {
+        if (wasAlreadyFetchingAll) setIsFetchingAllTransactions(true);
+        const records = await fetchTransactionsByDateRange(start || '2000-01-01', end || '2099-12-31');
+        setTransactions(prev => {
+          const map = new Map(prev.map(t => [t.id, t]));
+          records.forEach(r => map.set(r.id, r));
+          return Array.from(map.values()).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        });
+        if (wasAlreadyFetchingAll) setIsFetchingAllTransactions(false);
+      }
+    } catch (e) {
+      console.error('Failed to query date range:', e);
+      setIsFetchingAllTransactions(false);
+    }
+  };
+
   const handleResumeDraft = (tx: Transaction) => {
     // Reconstruct POS Cart from Transaction Items
     const restoredCart = (tx.items || []).map(item => {
@@ -1586,6 +1599,9 @@ const App: React.FC = () => {
               daySessions={daySessions}
               userProfile={userProfile}
               onNavigate={setCurrentView}
+              onFetchData={handleQueryDateRange}
+              hasMore={!fetchAllTransactions}
+              isLoadingMore={isFetchingAllTransactions}
             />
           )}
           {currentView === 'POS' && <POS accounts={accounts} products={products} daySessions={daySessions} customers={customers} transactions={transactions} categories={categories} userProfile={userProfile} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onUpdateProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onCompleteSale={handleCompleteSale} onSaveDraftSale={handleSaveDraftSale} posSession={posSession} setPosSession={setPosSession} onQuickOpenDay={(bal, branchToOpen) => {
@@ -1594,13 +1610,50 @@ const App: React.FC = () => {
             upsertDocument(dbCols.daySessions, docId, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: targetBranch, id: docId });
           }} onGoToFinance={() => setCurrentView('FINANCE')} activeSession={branchDaySession} />}
           {currentView === 'QUOTATIONS' && <Quotations products={branchProducts} customers={customers} categories={categories} userProfile={userProfile} quotations={quotations} onUpsertQuotation={(q) => upsertDocument(dbCols.quotations, q.id, q)} onDeleteQuotation={(id) => deleteDocument(dbCols.quotations, id)} onConvertQuotation={handleConvertQuoteToSale} />}
-          {currentView === 'SALES_HISTORY' && <SalesHistory jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} transactions={transactions} products={products} customers={customers} categories={categories} userProfile={userProfile} accounts={accounts} daySessions={daySessions} purchaseOrders={purchaseOrders} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResumeDraft={handleResumeDraft} onCompleteSale={handleCompleteSale} />}
+          {currentView === 'SALES_HISTORY' && (
+            <SalesHistory
+              jumpTarget={jumpTarget}
+              clearJump={() => setJumpTarget(null)}
+              transactions={transactions}
+              products={products}
+              customers={customers}
+              categories={categories}
+              userProfile={userProfile}
+              accounts={accounts}
+              daySessions={daySessions}
+              purchaseOrders={purchaseOrders}
+              onUpdateTransaction={handleUpdateGlobalTransaction}
+              onDeleteTransaction={handleDeleteGlobalTransaction}
+              onResumeDraft={handleResumeDraft}
+              onCompleteSale={handleCompleteSale}
+              onLoadMore={() => setFetchAllTransactions(true)}
+              hasMore={!fetchAllTransactions}
+              isLoadingMore={isFetchingAllTransactions}
+              onQueryDateRange={handleQueryDateRange}
+            />
+          )}
           {currentView === 'INVENTORY' && <Inventory products={branchProducts} categories={categories} vendors={vendors} userProfile={userProfile} onAddCategory={(name) => { const c = { id: `cat-${Date.now()}`, name: name.toUpperCase() }; upsertDocument(dbCols.categories, c.id, c); return c; }} onUpsertCategory={(cat) => upsertDocument(dbCols.categories, cat.id, cat)} onDeleteCategory={(id) => deleteDocument(dbCols.categories, id)} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onUpsertProduct={(p) => upsertDocument(dbCols.products, p.id, p)} onBulkUpsertProducts={handleBulkUpsertProducts} onDeleteProduct={(id) => deleteDocument(dbCols.products, id)} />}
           {
              currentView === 'FINANCE' && <Finance accounts={accounts} transactions={transactions} daySessions={filteredDaySessions} products={branchProducts} vendors={vendors} recurringExpenses={recurringExpenses} customers={customers} userProfile={userProfile} onOpenDay={(bal) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { date: getLocalDateString(), openingBalance: bal, status: 'OPEN', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onCloseDay={(actual) => upsertDocument(dbCols.daySessions, getLocalDateString() + activeBranch, { actualClosing: actual, status: 'CLOSED', branchId: activeBranch, id: getLocalDateString() + activeBranch })} onAddExpense={handleAddExpense} onAddTransfer={handleAddTransfer} onAddJournalEntry={handleAddJournalEntry}
-              onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} onDeleteAccount={handleDeleteAccount} onResumeDraft={handleResumeDraft} onJumpTo={handleJumpTo} />
+              onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onAddRecurring={(re) => upsertDocument(dbCols.recurringExpenses, re.id, re)} onDeleteRecurring={(id) => deleteDocument(dbCols.recurringExpenses, id)} onUpsertAccount={(acc) => upsertDocument(dbCols.accounts, acc.id, acc)} onDeleteAccount={handleDeleteAccount} onResumeDraft={handleResumeDraft} onJumpTo={handleJumpTo} onLoadMore={() => setFetchAllTransactions(true)} hasMore={!fetchAllTransactions} isLoadingMore={isFetchingAllTransactions} onFetchData={handleQueryDateRange} />
           }
-          {currentView === 'CUSTOMERS' && <Customers jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} customers={customers} transactions={transactions} accounts={accounts} products={products} onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)} onReceivePayment={handleCustomerPayment} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} />}
+          {currentView === 'CUSTOMERS' && (
+            <Customers
+              jumpTarget={jumpTarget}
+              clearJump={() => setJumpTarget(null)}
+              customers={customers}
+              transactions={transactions}
+              accounts={accounts}
+              products={products}
+              onUpsertCustomer={(c) => upsertDocument(dbCols.customers, c.id, c)}
+              onReceivePayment={handleCustomerPayment}
+              onUpdateTransaction={handleUpdateGlobalTransaction}
+              onDeleteTransaction={handleDeleteGlobalTransaction}
+              onLoadMore={() => setFetchAllTransactions(true)}
+              hasMore={!fetchAllTransactions}
+              isLoadingMore={isFetchingAllTransactions}
+            />
+          )}
 
           {currentView === 'SETTINGS' && <Settings userProfile={userProfile} setUserProfile={(val) => upsertDocument(dbCols.profile, 'main', val)} onExport={handleExport} onImport={handleImport} onResyncBalances={handleResyncBalances} syncStatus="OFFLINE" />}
           {currentView === 'BARCODE_PRINT' && <BarcodePrint products={branchProducts} categories={categories} />}
@@ -1608,17 +1661,22 @@ const App: React.FC = () => {
             <Reports
               transactions={transactions}
               products={products}
+              categories={categories}
+              purchaseOrders={purchaseOrders}
               vendors={vendors}
               customers={customers}
               userProfile={userProfile}
               accounts={accounts}
               fixedAssets={fixedAssets}
+              onFetchData={handleQueryDateRange}
+              hasMore={!fetchAllTransactions}
+              isLoadingMore={isFetchingAllTransactions}
             />
           )}
           {currentView === 'CHEQUE_PRINT' && <ChequePrint vendors={vendors} purchaseOrders={purchaseOrders} />}
           {currentView === 'PURCHASES' && <Purchases jumpTarget={jumpTarget} clearJump={() => setJumpTarget(null)} products={branchProducts} purchaseOrders={purchaseOrders} vendors={vendors} accounts={accounts} transactions={transactions} userProfile={userProfile} categories={categories} onUpsertPO={handleUpsertPO} onReceivePO={handleReceivePO} onDeletePO={handleDeletePO} onUpsertVendor={(v) => upsertDocument(dbCols.vendors, v.id, v)} onPayVendor={handlePayVendor} onUpdateTransaction={handleUpdateGlobalTransaction} onDeleteTransaction={handleDeleteGlobalTransaction} onResyncBalances={handleResyncBalances} />}
-          {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} />}
-          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} fixedAssets={fixedAssets} userProfile={userProfile} daySessions={daySessions} />}
+          {currentView === 'RELOAD' && <Reload products={branchProducts} categories={categories} userProfile={userProfile} transactions={transactions} customers={customers} onCompleteSale={handleCompleteSale} onFetchData={handleQueryDateRange} hasMore={!fetchAllTransactions} isLoadingMore={isFetchingAllTransactions} />}
+          {currentView === 'ACCOUNTING' && <Accounting transactions={transactions} accounts={accounts} customers={customers} vendors={vendors} products={products} categories={categories} purchaseOrders={purchaseOrders} fixedAssets={fixedAssets} userProfile={userProfile} daySessions={daySessions} onFetchData={handleQueryDateRange} hasMore={!fetchAllTransactions} isLoadingMore={isFetchingAllTransactions} />}
           {currentView === 'ACCOUNTING_LIABILITIES' && (
             <AccountingLiabilities
               accounts={accounts}

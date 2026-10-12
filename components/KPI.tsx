@@ -14,6 +14,9 @@ interface KPIProps {
     daySessions?: DaySession[];
     userProfile: UserProfile;
     onNavigate: (view: View) => void;
+    onFetchData?: (startDate?: string, endDate?: string) => Promise<void>;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
 }
 
 const KPI: React.FC<KPIProps> = ({
@@ -26,7 +29,10 @@ const KPI: React.FC<KPIProps> = ({
     vendors = [],
     purchaseOrders = [],
     userProfile,
-    onNavigate
+    onNavigate,
+    onFetchData,
+    hasMore = false,
+    isLoadingMore = false
 }) => {
     const getTodayLocal = () => {
         const d = new Date();
@@ -95,7 +101,7 @@ const KPI: React.FC<KPIProps> = ({
             const branchMatch = branchFilter === 'ALL' || tBranch === target;
 
             // Date Filter
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
             
             const isValidStatus = t.status !== 'DRAFT' && t.status !== 'VOID';
@@ -122,14 +128,14 @@ const KPI: React.FC<KPIProps> = ({
             }, 0);
 
         const manualPurchases = filteredTxs
-            .filter(t => t.type === 'PURCHASE' && !t.id.startsWith('PU-'))
+            .filter(t => t.type === 'PURCHASE' && !(t.id || '').startsWith('PU-'))
             .reduce((acc, t) => acc + Number(t.amount || 0), 0);
 
         const poPurchases = (purchaseOrders || []).filter(po => {
             const poBranch = normalizeBranch(po.branchId);
             const target = normalizeBranch(branchFilter);
             const branchMatch = branchFilter === 'ALL' || poBranch === target;
-            const txDate = po.date.split('T')[0];
+            const txDate = (po.date || '').split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
             return branchMatch && dateMatch && po.status !== 'DRAFT';
         }).reduce((acc, po) => acc + Number(po.totalAmount || 0), 0);
@@ -176,7 +182,7 @@ const KPI: React.FC<KPIProps> = ({
 
             const branchMatch = branchFilter === 'ALL' || tBranch === target;
 
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
 
             if (!branchMatch || !dateMatch || t.status === 'DRAFT' || t.status === 'VOID') return;
@@ -209,7 +215,7 @@ const KPI: React.FC<KPIProps> = ({
             const target = normalizeBranch(branchFilter);
             if (branchFilter !== 'ALL' && tBranch !== target) return;
 
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
             if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
@@ -254,7 +260,7 @@ const KPI: React.FC<KPIProps> = ({
             const target = normalizeBranch(branchFilter);
             if (branchFilter !== 'ALL' && tBranch !== target) return;
 
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             if ((startDate && txDate < startDate) || (endDate && txDate > endDate)) return;
             if (t.status === 'DRAFT' || t.status === 'VOID') return;
 
@@ -305,19 +311,19 @@ const KPI: React.FC<KPIProps> = ({
             const target = normalizeBranch(branchFilter);
             const branchMatch = branchFilter === 'ALL' || tBranch === target;
 
-            const txDate = t.date.split('T')[0];
+            const txDate = (t.date || '').split('T')[0];
             const dateMatch = (!startDate || txDate >= startDate) && (!endDate || txDate <= endDate);
 
             if (!branchMatch || !dateMatch || t.status === 'DRAFT' || t.status === 'VOID') return;
 
             // Extract hour
             let hour = 0;
-            if (t.date.includes('T')) {
-                const timePart = t.date.split('T')[1];
+            if ((t.date || '').includes('T')) {
+                const timePart = (t.date || '').split('T')[1] || '';
                 hour = parseInt(timePart.split(':')[0]);
             } else {
                 // Fallback for dates without T
-                const d = new Date(t.date);
+                const d = new Date(t.date || '');
                 hour = d.getHours();
             }
 
@@ -359,7 +365,7 @@ const KPI: React.FC<KPIProps> = ({
         }
 
         transactions.forEach(t => {
-            const tDate = t.date.split('T')[0];
+            const tDate = (t.date || '').split('T')[0];
             if (!stats.hasOwnProperty(tDate)) return;
 
             // Branch filter
@@ -416,7 +422,7 @@ const KPI: React.FC<KPIProps> = ({
         }
 
         transactions.forEach(t => {
-            const tDate = t.date.split('T')[0];
+            const tDate = (t.date || '').split('T')[0];
             if (!stats.hasOwnProperty(tDate)) return;
 
             // Branch filter
@@ -453,7 +459,7 @@ const KPI: React.FC<KPIProps> = ({
                 const amount = Number(t.amount || 0);
                 stats[tDate].expense += amount;
                 stats[tDate].profit -= amount;
-            } else if (t.type === 'PURCHASE' && !t.id.startsWith('PU-')) {
+            } else if (t.type === 'PURCHASE' && !(t.id || '').startsWith('PU-')) {
                 const amount = Number(t.amount || 0);
                 stats[tDate].purchase += amount;
                 stats[tDate].sales -= amount; // Deduct from sales/revenue per user request
@@ -462,7 +468,7 @@ const KPI: React.FC<KPIProps> = ({
 
         // Add POs to daily financials
         (purchaseOrders || []).forEach(po => {
-            const poDate = po.date.split('T')[0];
+            const poDate = (po.date || '').split('T')[0];
             if (!stats.hasOwnProperty(poDate)) return;
 
             const tBranch = normalizeBranch(po.branchId);
@@ -504,7 +510,7 @@ const KPI: React.FC<KPIProps> = ({
         }
 
         transactions.forEach(t => {
-            const tDate = t.date.split('T')[0];
+            const tDate = (t.date || '').split('T')[0];
             if (!stats.hasOwnProperty(tDate)) return;
 
             // Branch filter
@@ -583,13 +589,43 @@ const KPI: React.FC<KPIProps> = ({
                     <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-2xl border border-slate-100 shadow-sm">
                         <div className="space-y-1 px-2">
                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">From</label>
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="outline-none text-xs font-bold text-slate-700 uppercase bg-transparent" />
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={e => {
+                                    const val = e.target.value;
+                                    setStartDate(val);
+                                    if (onFetchData) onFetchData(val, endDate);
+                                }}
+                                className="outline-none text-xs font-bold text-slate-700 uppercase bg-transparent"
+                            />
                         </div>
                         <div className="h-8 w-px bg-slate-100"></div>
                         <div className="space-y-1 px-2">
                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">To</label>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="outline-none text-xs font-bold text-slate-700 uppercase bg-transparent" />
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={e => {
+                                    const val = e.target.value;
+                                    setEndDate(val);
+                                    if (onFetchData) onFetchData(startDate, val);
+                                }}
+                                className="outline-none text-xs font-bold text-slate-700 uppercase bg-transparent"
+                            />
                         </div>
+                        {onFetchData && (
+                            <button
+                                type="button"
+                                disabled={isLoadingMore}
+                                onClick={() => onFetchData(startDate, endDate)}
+                                className="ml-1 px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+                                title="Fetch all data for selected date range"
+                            >
+                                <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+                                <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+                            </button>
+                        )}
                     </div>
 
                     {userProfile.allBranches && userProfile.allBranches.length > 0 && (

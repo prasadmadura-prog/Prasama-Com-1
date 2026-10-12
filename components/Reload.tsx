@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Product, Category, Transaction, UserProfile, Customer } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { getReloadCostRate } from '../utils/reloadUtils';
 
 interface ReloadProps {
     products: Product[];
@@ -9,6 +10,9 @@ interface ReloadProps {
     transactions: Transaction[];
     customers: Customer[];
     onCompleteSale: (tx: any) => void;
+    onFetchData?: (startDate?: string, endDate?: string) => Promise<void>;
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
 }
 
 const topUpIcons: Record<string, string> = {
@@ -18,7 +22,7 @@ const topUpIcons: Record<string, string> = {
     'HUTCH': '🟧'
 };
 
-const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, transactions, customers, onCompleteSale }) => {
+const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, transactions, customers, onCompleteSale, onFetchData, hasMore = false, isLoadingMore = false }) => {
     const [provider, setProvider] = useState<string>('DIALOG');
     const [phoneNumber, setPhoneNumber] = useState('');
     const [amount, setAmount] = useState('');
@@ -65,6 +69,17 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
             cName.includes('DIALOG') || cName.includes('MOBITEL') || cName.includes('AIRTEL') || cName.includes('HUTCH');
     };
 
+    const getProviderCostRate = (prov: string, prod?: Product) => {
+        if (prod && (
+            (typeof prod.reloadCommissionPercent === 'number' && prod.reloadCommissionPercent > 0 && prod.reloadCommissionPercent < 100) ||
+            (typeof prod.reloadCostPercent === 'number' && prod.reloadCostPercent > 0 && prod.reloadCostPercent < 100) ||
+            (Number(prod.price || 0) > 0 && Number(prod.cost || 0) > 0 && Number(prod.cost || 0) < Number(prod.price || 0))
+        )) {
+            return getReloadCostRate(prod);
+        }
+        return (prov === 'MOBITEL' || prov === 'HUTCH') ? 0.94 : 0.96;
+    };
+
     const handleProcessReload = () => {
         const reloadAmount = parseFloat(amount);
         if (!reloadAmount || reloadAmount <= 0) {
@@ -91,12 +106,12 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
             discount: 0
         };
 
-        // Commission: Mobitel/Hutch 6%, others 4% (Digital Hot Reload)
+        // Commission: uses product's assigned percentage per provider, or fallback
         const categoryName = (existingProduct?.categoryId ? categories.find(c => c.id === existingProduct.categoryId)?.name || "" : "").toUpperCase();
         const isReloadCard = categoryName.includes('RELOAD CARD');
 
-        const rate = (provider === 'MOBITEL' || provider === 'HUTCH') ? 0.06 : 0.04;
-        const defaultCostBasis = reloadAmount * (1 - rate);
+        const costRate = getProviderCostRate(provider, existingProduct);
+        const defaultCostBasis = reloadAmount * costRate;
 
         // Use inventory cost IF it's a RELOAD CARD (Normal Setting), otherwise use Hot Reload logic
         const costBasis = isReloadCard && existingProduct ? (Number(existingProduct.cost) * (reloadAmount / Number(existingProduct.price || 1))) : defaultCostBasis;
@@ -249,12 +264,12 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                         discount: 0
                     };
 
-                    // Commission: Mobitel/Hutch 6%, others 4% (Digital Hot Reload)
+                    // Commission: uses product's assigned percentage per provider, or fallback
                     const categoryName = (existingProduct?.categoryId ? categories.find(c => c.id === existingProduct.categoryId)?.name || "" : "").toUpperCase();
                     const isReloadCard = categoryName.includes('RELOAD CARD');
 
-                    const rate = (importProvider === 'MOBITEL' || importProvider === 'HUTCH') ? 0.06 : 0.04;
-                    const defaultCostBasis = Math.abs(amount) * (1 - rate);
+                    const costRate = getProviderCostRate(importProvider, existingProduct);
+                    const defaultCostBasis = Math.abs(amount) * costRate;
 
                     const costBasis = isReloadCard && existingProduct ? (Number(existingProduct.cost) * (Math.abs(amount) / Number(existingProduct.price || 1))) : defaultCostBasis;
 
@@ -310,19 +325,101 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
         }
     };
 
-    const getProviderBalance = (provId: string) => {
+    const getProviderProduct = (provId: string) => {
         const targetName = `RELOAD ${provId}`;
-        const prod = products.find(p => p.name === targetName);
-        return prod ? prod.stock : 0;
+        return products.find(p => (p.name || '').toUpperCase().trim() === targetName) ||
+            products.find(p => {
+                const cat = categories.find(c => c.id === p.categoryId);
+                return isReloadItem({ productId: p.id }, p, cat) && (p.name || '').toUpperCase().includes(provId);
+            });
+    };
+
+    const getProviderBalance = (provId: string) => {
+        const prod = getProviderProduct(provId);
+        return prod ? Number(prod.stock || 0) : 0;
+    };
+
+    const getTxReloadBreakdown = (t: Transaction) => {
+        const byProvider: Record<string, { sales: number; cost: number; profit: number }> = {
+            DIALOG: { sales: 0, cost: 0, profit: 0 },
+            MOBITEL: { sales: 0, cost: 0, profit: 0 },
+            AIRTEL: { sales: 0, cost: 0, profit: 0 },
+            HUTCH: { sales: 0, cost: 0, profit: 0 }
+        };
+        if (t.status === 'DRAFT' || t.status === 'VOID') return { isReload: false, totalSales: 0, totalCost: 0, totalProfit: 0, byProvider, primaryProvider: 'OTHER' };
+        if (t.type !== 'SALE' && t.type !== 'SALE_HISTORY_IMPORT') return { isReload: false, totalSales: 0, totalCost: 0, totalProfit: 0, byProvider, primaryProvider: 'OTHER' };
+
+        const desc = (t.description || '').toUpperCase();
+        let totalSales = 0;
+        let totalCost = 0;
+        let totalProfit = 0;
+        let primaryProvider = 'OTHER';
+
+        if (t.items && t.items.length > 0) {
+            t.items.forEach(i => {
+                const p = products.find(prod => prod.id === i.productId);
+                const category = categories.find(c => c.id === p?.categoryId);
+                if (isReloadItem(i, p, category, t.description)) {
+                    const lineTotal = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
+                    const pName = (p?.name || '').toUpperCase();
+                    const cName = (category?.name || '').toUpperCase();
+                    let prov = 'DIALOG';
+                    if (desc.includes('MOBITEL') || pName.includes('MOBITEL') || cName.includes('MOBITEL')) prov = 'MOBITEL';
+                    else if (desc.includes('AIRTEL') || pName.includes('AIRTEL') || cName.includes('AIRTEL')) prov = 'AIRTEL';
+                    else if (desc.includes('HUTCH') || pName.includes('HUTCH') || cName.includes('HUTCH')) prov = 'HUTCH';
+                    else if (desc.includes('DIALOG') || pName.includes('DIALOG') || cName.includes('DIALOG')) prov = 'DIALOG';
+
+                    const costRate = getProviderCostRate(prov, p);
+                    const lineCost = lineTotal * costRate;
+                    const lineProfit = lineTotal - lineCost;
+
+                    byProvider[prov].sales += lineTotal;
+                    byProvider[prov].cost += lineCost;
+                    byProvider[prov].profit += lineProfit;
+                    totalSales += lineTotal;
+                    totalCost += lineCost;
+                    totalProfit += lineProfit;
+                    primaryProvider = prov;
+                }
+            });
+        } else if (desc.includes('RELOAD') && !desc.includes('CARD')) {
+            const lineTotal = Number(t.amount || 0);
+            let prov = 'DIALOG';
+            if (desc.includes('MOBITEL')) prov = 'MOBITEL';
+            else if (desc.includes('AIRTEL')) prov = 'AIRTEL';
+            else if (desc.includes('HUTCH')) prov = 'HUTCH';
+
+            const prod = getProviderProduct(prov);
+            const costRate = getProviderCostRate(prov, prod);
+            const lineCost = lineTotal * costRate;
+            const lineProfit = lineTotal - lineCost;
+
+            byProvider[prov].sales += lineTotal;
+            byProvider[prov].cost += lineCost;
+            byProvider[prov].profit += lineProfit;
+            totalSales += lineTotal;
+            totalCost += lineCost;
+            totalProfit += lineProfit;
+            primaryProvider = prov;
+        }
+
+        return {
+            isReload: totalSales > 0,
+            totalSales,
+            totalCost,
+            totalProfit,
+            byProvider,
+            primaryProvider
+        };
     };
 
     // Filter recent reload transactions - Branch Aware
     const recentReloads = useMemo(() => {
         return transactions
             .filter(t => {
-                const isReload = t.type === 'SALE' && (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD')));
+                const breakdown = getTxReloadBreakdown(t);
                 const branchMatch = normalizeBranch(t.branchId) === normalizeBranch(userProfile.branch);
-                return isReload && branchMatch;
+                return breakdown.isReload && branchMatch;
             })
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             .slice(0, 10);
@@ -344,48 +441,18 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
         }
 
         transactions.forEach(t => {
-            const date = t.date.split('T')[0];
+            const date = (t.date || '').split('T')[0];
             if (!dateMap.hasOwnProperty(date)) return;
 
             // Branch filter
             if (normalizeBranch(t.branchId) !== normalizeBranch(userProfile.branch)) return;
 
-            if (t.type === 'SALE') {
-                const desc = (t.description || '').toUpperCase();
-
-                if (t.items) {
-                    t.items.forEach(i => {
-                        const p = products.find(prod => prod.id === i.productId);
-                        const category = categories.find(c => c.id === p?.categoryId);
-
-                        if (isReloadItem(i, p, category, t.description)) {
-                            const amount = (Number(i.quantity) * Number(i.price)) - (Number(i.discount) || 0);
-                            const pName = (p?.name || '').toUpperCase();
-
-                            if (desc.includes('DIALOG') || pName.includes('DIALOG')) {
-                                dateMap[date].dialog += amount;
-                            } else if (desc.includes('MOBITEL') || pName.includes('MOBITEL')) {
-                                dateMap[date].mobitel += amount;
-                            } else if (desc.includes('AIRTEL') || pName.includes('AIRTEL')) {
-                                dateMap[date].airtel += amount;
-                            } else if (desc.includes('HUTCH') || pName.includes('HUTCH')) {
-                                dateMap[date].hutch += amount;
-                            } else {
-                                dateMap[date].dialog += amount;
-                            }
-                        }
-                    });
-                } else {
-                    // Fallback for transactions without items
-                    if (desc.includes('RELOAD')) {
-                        const amount = Number(t.amount || 0);
-                        if (desc.includes('DIALOG')) dateMap[date].dialog += amount;
-                        else if (desc.includes('MOBITEL')) dateMap[date].mobitel += amount;
-                        else if (desc.includes('AIRTEL')) dateMap[date].airtel += amount;
-                        else if (desc.includes('HUTCH')) dateMap[date].hutch += amount;
-                        else dateMap[date].dialog += amount;
-                    }
-                }
+            const breakdown = getTxReloadBreakdown(t);
+            if (breakdown.isReload) {
+                dateMap[date].dialog += breakdown.byProvider.DIALOG.sales;
+                dateMap[date].mobitel += breakdown.byProvider.MOBITEL.sales;
+                dateMap[date].airtel += breakdown.byProvider.AIRTEL.sales;
+                dateMap[date].hutch += breakdown.byProvider.HUTCH.sales;
             }
         });
 
@@ -399,18 +466,63 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
         }));
     }, [transactions, userProfile.branch, products, categories]);
 
-    // History Checker Logic - Branch Aware
+    // History Checker Logic - All Terminals or Active Terminal
+    const [historyBranchFilter, setHistoryBranchFilter] = useState<'ALL' | 'ACTIVE'>('ALL');
+
     const historyReloads = useMemo(() => {
         return transactions
             .filter(t => {
-                const isReload = t.type === 'SALE' && (t.description?.includes('RELOAD') || t.items?.some(i => i.productId.includes('RELOAD')));
-                const tDate = t.date.split('T')[0];
-                const isWithinRange = tDate >= historyStartDate && tDate <= historyEndDate;
-                const branchMatch = normalizeBranch(t.branchId) === normalizeBranch(userProfile.branch);
-                return isReload && isWithinRange && branchMatch;
+                const tDate = (t.date || '').split('T')[0];
+                const isWithinRange = (!historyStartDate || tDate >= historyStartDate) && (!historyEndDate || tDate <= historyEndDate);
+                if (!isWithinRange) return false;
+                const branchMatch = historyBranchFilter === 'ALL' || normalizeBranch(t.branchId) === normalizeBranch(userProfile.branch);
+                if (!branchMatch) return false;
+                const breakdown = getTxReloadBreakdown(t);
+                return breakdown.isReload;
             })
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }, [transactions, historyStartDate, historyEndDate, userProfile.branch]);
+    }, [transactions, historyStartDate, historyEndDate, userProfile.branch, historyBranchFilter, products, categories]);
+
+    // Reload Inventory = Sales - Balance Summary per Provider for the selected date range
+    const reloadInventorySummary = useMemo(() => {
+        const summary: Record<string, { sales: number; cost: number; profit: number; balance: number; reloadInventoryDiff: number }> = {
+            DIALOG: { sales: 0, cost: 0, profit: 0, balance: getProviderBalance('DIALOG'), reloadInventoryDiff: 0 },
+            MOBITEL: { sales: 0, cost: 0, profit: 0, balance: getProviderBalance('MOBITEL'), reloadInventoryDiff: 0 },
+            AIRTEL: { sales: 0, cost: 0, profit: 0, balance: getProviderBalance('AIRTEL'), reloadInventoryDiff: 0 },
+            HUTCH: { sales: 0, cost: 0, profit: 0, balance: getProviderBalance('HUTCH'), reloadInventoryDiff: 0 }
+        };
+
+        historyReloads.forEach(tx => {
+            const breakdown = getTxReloadBreakdown(tx);
+            (['DIALOG', 'MOBITEL', 'AIRTEL', 'HUTCH'] as const).forEach(prov => {
+                summary[prov].sales += breakdown.byProvider[prov].sales;
+                summary[prov].cost += breakdown.byProvider[prov].cost;
+                summary[prov].profit += breakdown.byProvider[prov].profit;
+            });
+        });
+
+        let totalSales = 0;
+        let totalCost = 0;
+        let totalProfit = 0;
+        let totalBalance = 0;
+
+        (['DIALOG', 'MOBITEL', 'AIRTEL', 'HUTCH'] as const).forEach(prov => {
+            summary[prov].reloadInventoryDiff = summary[prov].sales - summary[prov].balance;
+            totalSales += summary[prov].sales;
+            totalCost += summary[prov].cost;
+            totalProfit += summary[prov].profit;
+            totalBalance += summary[prov].balance;
+        });
+
+        return {
+            byProvider: summary,
+            totalSales,
+            totalCost,
+            totalProfit,
+            totalBalance,
+            totalReloadInventoryDiff: totalSales - totalBalance
+        };
+    }, [historyReloads, products, categories]);
 
     return (
         <div className="h-full flex flex-col gap-6 p-4">
@@ -443,6 +555,7 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                         {providers.map(p => {
                             const isActive = provider === p.id;
                             const balance = getProviderBalance(p.id);
+                            const provStats = reloadInventorySummary.byProvider[p.id];
 
                             return (
                                 <button
@@ -454,7 +567,10 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                         <span className="text-3xl">{topUpIcons[p.id] || p.icon}</span>
                                         <span className={`text-sm font-black uppercase tracking-widest ${isActive ? 'text-white' : 'text-slate-700'}`}>{p.label}</span>
                                         <div className={`px-2 py-1 rounded text-[10px] font-mono font-bold ${isActive ? 'bg-black/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                                            Bal: {balance.toLocaleString()}
+                                            Bal: Rs. {Math.round(balance).toLocaleString()}
+                                        </div>
+                                        <div className={`text-[9px] font-mono font-bold ${isActive ? 'text-white/90' : 'text-slate-400'}`}>
+                                            Sales: Rs. {Math.round(provStats?.sales || 0).toLocaleString()}
                                         </div>
                                     </div>
                                 </button>
@@ -567,20 +683,32 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                         </div>
                     </div>
 
-                    {/* Reload History Checker */}
-                    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex-1 min-h-0 flex flex-col">
-                        <div className="flex justify-between items-center mb-4">
+                    {/* Reload Inventory = Sales - Balance & History Checker */}
+                    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex-1 min-h-0 flex flex-col gap-4">
+                        <div className="flex flex-wrap justify-between items-center gap-4">
                             <div>
-                                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reload History Checker</h3>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Verify Top-up Transactions</p>
+                                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Reload Inventory, Sales & Balance</h3>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Reload Inventory = Sales − Balance (By Selected Date Range)</p>
                             </div>
-                            <div className="flex items-center gap-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <select
+                                    value={historyBranchFilter}
+                                    onChange={(e) => setHistoryBranchFilter(e.target.value as 'ALL' | 'ACTIVE')}
+                                    className="px-3 py-2 rounded-xl border-2 border-slate-100 font-black text-[10px] uppercase text-indigo-700 outline-none focus:border-indigo-500 bg-indigo-50/50"
+                                >
+                                    <option value="ALL">All Terminals</option>
+                                    <option value="ACTIVE">Active Terminal ({userProfile.branch})</option>
+                                </select>
                                 <div className="flex items-center gap-2">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">From:</label>
                                     <input
                                         type="date"
                                         value={historyStartDate}
-                                        onChange={(e) => setHistoryStartDate(e.target.value)}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setHistoryStartDate(val);
+                                            if (onFetchData) onFetchData(val, historyEndDate);
+                                        }}
                                         className="px-3 py-2 rounded-xl border-2 border-slate-100 font-bold text-xs uppercase text-slate-700 outline-none focus:border-indigo-500 bg-slate-50"
                                     />
                                 </div>
@@ -589,11 +717,82 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                     <input
                                         type="date"
                                         value={historyEndDate}
-                                        onChange={(e) => setHistoryEndDate(e.target.value)}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            setHistoryEndDate(val);
+                                            if (onFetchData) onFetchData(historyStartDate, val);
+                                        }}
                                         className="px-3 py-2 rounded-xl border-2 border-slate-100 font-bold text-xs uppercase text-slate-700 outline-none focus:border-indigo-500 bg-slate-50"
                                     />
                                 </div>
+                                {onFetchData && (
+                                    <button
+                                        type="button"
+                                        disabled={isLoadingMore}
+                                        onClick={() => onFetchData(historyStartDate, historyEndDate)}
+                                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+                                        title="Fetch all data for selected date range"
+                                    >
+                                        <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+                                        <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+                                    </button>
+                                )}
                             </div>
+                        </div>
+
+                        {/* Summary Cards: Total Sales, Cost, Balance, Reload Inventory (Sales - Balance) */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reload Sales</p>
+                                <p className="text-lg font-black font-mono text-slate-900">Rs. {Math.round(reloadInventorySummary.totalSales).toLocaleString()}</p>
+                                <p className="text-[8px] font-bold text-emerald-600 uppercase">Margin: Rs. {Math.round(reloadInventorySummary.totalProfit).toLocaleString()}</p>
+                            </div>
+                            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reload Cost (96%)</p>
+                                <p className="text-lg font-black font-mono text-indigo-600">Rs. {Math.round(reloadInventorySummary.totalCost).toLocaleString()}</p>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Product Cost of Sales</p>
+                            </div>
+                            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Current Balance</p>
+                                <p className="text-lg font-black font-mono text-amber-600">Rs. {Math.round(reloadInventorySummary.totalBalance).toLocaleString()}</p>
+                                <p className="text-[8px] font-bold text-slate-400 uppercase">Remaining Stock in Inventory</p>
+                            </div>
+                            <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-100">
+                                <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Sales − Balance</p>
+                                <p className="text-lg font-black font-mono text-indigo-900">Rs. {Math.round(reloadInventorySummary.totalReloadInventoryDiff).toLocaleString()}</p>
+                                <p className="text-[8px] font-bold text-indigo-500 uppercase">Sales + Bal: Rs. {Math.round(reloadInventorySummary.totalSales + reloadInventorySummary.totalBalance).toLocaleString()}</p>
+                            </div>
+                        </div>
+
+                        {/* Per-Provider Breakdown Table */}
+                        <div className="border border-slate-100 rounded-2xl overflow-hidden">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-slate-50">
+                                    <tr>
+                                        <th className="py-2 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest">Provider</th>
+                                        <th className="py-2 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Sales (Rs)</th>
+                                        <th className="py-2 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Product Cost (Rs)</th>
+                                        <th className="py-2 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Margin (Rs)</th>
+                                        <th className="py-2 px-3 text-[9px] font-black text-slate-500 uppercase tracking-widest text-right">Current Balance (Rs)</th>
+                                        <th className="py-2 px-3 text-[9px] font-black text-indigo-600 uppercase tracking-widest text-right">Reload Inventory (Sales − Bal)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {(['DIALOG', 'MOBITEL', 'AIRTEL', 'HUTCH'] as const).map(prov => {
+                                        const row = reloadInventorySummary.byProvider[prov];
+                                        return (
+                                            <tr key={prov} className="border-t border-slate-100 text-xs font-mono">
+                                                <td className="py-2 px-3 font-sans font-black text-slate-800">{prov}</td>
+                                                <td className="py-2 px-3 text-right font-bold text-slate-900">{ row.sales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }</td>
+                                                <td className="py-2 px-3 text-right font-bold text-slate-600">{ row.cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }</td>
+                                                <td className="py-2 px-3 text-right font-bold text-emerald-600">{ row.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }</td>
+                                                <td className="py-2 px-3 text-right font-bold text-amber-600">{ row.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }</td>
+                                                <td className="py-2 px-3 text-right font-black text-indigo-700 bg-indigo-50/30">{ row.reloadInventoryDiff.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
 
                         <div className="flex-1 overflow-y-auto pr-2">
@@ -602,7 +801,7 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                     <tr>
                                         <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Time</th>
                                         <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Provider</th>
-                                        <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Phone Number</th>
+                                        <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Phone Number / Desc</th>
                                         <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Reference</th>
                                         <th className="py-3 px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Amount</th>
                                     </tr>
@@ -610,13 +809,15 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                 <tbody>
                                     {historyReloads.length > 0 ? (
                                         historyReloads.map(tx => {
-                                            const isDialog = (tx.description || '').toUpperCase().includes('DIALOG');
-                                            const isMobitel = (tx.description || '').toUpperCase().includes('MOBITEL');
-                                            const isAirtel = (tx.description || '').toUpperCase().includes('AIRTEL');
-                                            const isHutch = (tx.description || '').toUpperCase().includes('HUTCH');
+                                            const breakdown = getTxReloadBreakdown(tx);
+                                            const prov = breakdown.primaryProvider;
+                                            const isDialog = prov === 'DIALOG';
+                                            const isMobitel = prov === 'MOBITEL';
+                                            const isAirtel = prov === 'AIRTEL';
+                                            const isHutch = prov === 'HUTCH';
 
                                             // Extract phone from description "RELOAD: PROVIDER - PHONE"
-                                            const phone = tx.description?.split('-').pop()?.trim() || 'Unknown';
+                                            const phone = tx.description?.includes('-') ? (tx.description?.split('-').pop()?.trim() || tx.description) : (tx.description || 'POS Reload');
 
                                             return (
                                                 <tr key={tx.id} className="group hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
@@ -629,12 +830,12 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                                                 isAirtel ? 'bg-red-50 text-red-600' :
                                                                     isHutch ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-600'
                                                             }`}>
-                                                            {isDialog ? 'DIALOG' : isMobitel ? 'MOBITEL' : isAirtel ? 'AIRTEL' : isHutch ? 'HUTCH' : 'OTHER'}
+                                                            {prov}
                                                         </span>
                                                     </td>
                                                     <td className="py-3 px-2 font-mono text-xs font-bold text-slate-700">{phone}</td>
                                                     <td className="py-3 px-2 font-mono text-[9px] font-bold text-slate-400">{tx.id}</td>
-                                                    <td className="py-3 px-2 font-mono text-xs font-black text-slate-900 text-right">Rs. {Number(tx.amount).toLocaleString()}</td>
+                                                    <td className="py-3 px-2 font-mono text-xs font-black text-slate-900 text-right">Rs. {Number(breakdown.totalSales || tx.amount).toLocaleString()}</td>
                                                 </tr>
                                             );
                                         })
@@ -661,10 +862,11 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                     </div>
                     <div className="flex-1 overflow-y-auto p-2 space-y-2">
                         {recentReloads.length > 0 ? recentReloads.map(tx => {
-                            const isDialog = tx.description.includes('DIALOG');
-                            const isMobitel = tx.description.includes('MOBITEL');
-                            const isAirtel = tx.description.includes('AIRTEL');
-                            const isHutch = tx.description.includes('HUTCH');
+                            const desc = tx.description || '';
+                            const isDialog = desc.includes('DIALOG');
+                            const isMobitel = desc.includes('MOBITEL');
+                            const isAirtel = desc.includes('AIRTEL');
+                            const isHutch = desc.includes('HUTCH');
 
                             let colorClass = 'bg-slate-50 border-slate-100 text-slate-500';
                             if (isDialog) colorClass = 'bg-rose-50 border-rose-100 text-rose-600';
@@ -681,7 +883,7 @@ const Reload: React.FC<ReloadProps> = ({ products, categories, userProfile, tran
                                             </span>
                                             <span className="text-[9px] font-mono text-slate-400">{new Date(tx.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                         </div>
-                                        <p className="text-[11px] font-black text-slate-700 truncate max-w-[150px]">{tx.description.split('-').pop()?.trim() || 'Unknown'}</p>
+                                        <p className="text-[11px] font-black text-slate-700 truncate max-w-[150px]">{desc.split('-').pop()?.trim() || 'Unknown'}</p>
                                     </div>
                                     <p className="font-mono font-black text-slate-900">Rs. {Number(tx.amount).toLocaleString()}</p>
                                 </div>

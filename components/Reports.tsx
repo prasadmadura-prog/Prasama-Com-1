@@ -1,15 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, Product, Vendor, Customer, BankAccount, UserProfile, FixedAsset } from '../types';
+import { Transaction, Product, Vendor, Customer, BankAccount, UserProfile, FixedAsset, Category, PurchaseOrder } from '../types';
 import * as XLSX from 'xlsx';
+import { isHotReloadProduct, getReloadCostRate } from '../utils/reloadUtils';
 
 interface ReportsProps {
   transactions: Transaction[];
   products: Product[];
+  categories?: Category[];
+  purchaseOrders?: PurchaseOrder[];
   vendors: Vendor[];
   customers: Customer[];
   userProfile: UserProfile;
   accounts: BankAccount[];
   fixedAssets?: FixedAsset[];
+  onFetchData?: (startDate?: string, endDate?: string) => Promise<void>;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
 interface LedgerEntry {
@@ -28,11 +34,16 @@ interface LedgerEntry {
 const Reports: React.FC<ReportsProps> = ({
   transactions,
   products,
+  categories = [],
+  purchaseOrders = [],
   vendors,
   customers,
   userProfile,
   accounts,
-  fixedAssets = []
+  fixedAssets = [],
+  onFetchData,
+  hasMore = false,
+  isLoadingMore = false
 }) => {
   // Filters state
   const [selectedAccount, setSelectedAccount] = useState<string>('All Accounts');
@@ -77,6 +88,39 @@ const Reports: React.FC<ReportsProps> = ({
     const parseTxDate = (dateStr: string) => {
       const parsed = Date.parse(dateStr);
       return isNaN(parsed) ? Date.now() : parsed;
+    };
+
+    const getSaleCogs = (t: Transaction): number => {
+      let fallbackCogs = 0;
+      let hasHotReload = false;
+
+      if (t.items && t.items.length > 0) {
+        t.items.forEach(item => {
+          const prod = products.find(p => p.id === item.productId || p.sku === item.productId || p.name === item.productId);
+          const cat = prod?.categoryId ? categories.find(c => c.id === prod.categoryId) : undefined;
+          const extraText = `${(item as any).name || ''} ${item.productId || ''} ${t.description || ''}`;
+          const qty = Number(item.quantity || 0);
+          const price = Number(item.price || prod?.price || 0);
+          const discount = Number(item.discount || 0);
+          const lineTotal = Math.max(0, (qty * price) - discount);
+
+          if (isHotReloadProduct(prod, cat, extraText)) {
+            hasHotReload = true;
+            const rate = getReloadCostRate(prod, cat, extraText);
+            fallbackCogs += lineTotal * rate;
+          } else {
+            const unitCost = Number((item as any).cost || prod?.cost || 0);
+            fallbackCogs += qty * unitCost;
+          }
+        });
+      } else if (isHotReloadProduct(undefined, undefined, t.description || '')) {
+        hasHotReload = true;
+        fallbackCogs = Number(t.amount || 0) * getReloadCostRate(undefined, undefined, t.description || '');
+      }
+
+      const storedCost = Number(t.costBasis || 0);
+      if (hasHotReload) return fallbackCogs;
+      return storedCost > 0 ? storedCost : fallbackCogs;
     };
 
     const getAccountLedgerName = (accId: string | null): string => {
@@ -168,8 +212,8 @@ const Reports: React.FC<ReportsProps> = ({
           branchId: branch
         });
 
-        // Posting 3 & 4: COGS and Inventory Credit (if costBasis is provided)
-        const cogs = Number(t.costBasis || 0);
+        // Posting 3 & 4: COGS and Inventory Credit (with fallback to item costs)
+        const cogs = getSaleCogs(t);
         if (cogs > 0) {
           entries.push({
             id: `${t.id}-cogs`,
@@ -464,6 +508,59 @@ const Reports: React.FC<ReportsProps> = ({
       }
     });
 
+    // Process non-draft purchaseOrders that do not already have a corresponding PURCHASE transaction
+    purchaseOrders.forEach(po => {
+      if (!po || po.status === 'DRAFT' || (po.status as any) === 'VOID') return;
+      const hasMatchingTx = transactions.some(t =>
+        t.status !== 'VOID' &&
+        t.status !== 'DRAFT' &&
+        t.type === 'PURCHASE' &&
+        (t.id === po.id || (t.description && t.description.includes(po.id)))
+      );
+      if (hasMatchingTx) return;
+
+      const poDate = po.date || new Date().toISOString();
+      const timestamp = parseTxDate(poDate);
+      const branch = po.branchId || 'CASHIER 1';
+      const amount = Number(po.totalAmount || 0);
+      if (amount <= 0) return;
+      const isCreditPayment = po.paymentMethod === 'CREDIT';
+      const ledgerAcc = getAccountLedgerName(po.accountId || null);
+
+      entries.push({
+        id: `${po.id}-dr`,
+        date: poDate,
+        timestamp,
+        refId: po.id,
+        type: 'PURCHASE',
+        description: `Purchase Order ${po.id}`,
+        account: 'Inventory Asset',
+        debit: amount,
+        credit: 0,
+        branchId: branch
+      });
+      netInventoryMovement += amount;
+
+      entries.push({
+        id: `${po.id}-cr`,
+        date: poDate,
+        timestamp,
+        refId: po.id,
+        type: 'PURCHASE',
+        description: `Purchase Order payment for ${po.id}`,
+        account: isCreditPayment ? 'Accounts Payable' : ledgerAcc,
+        debit: 0,
+        credit: amount,
+        branchId: branch
+      });
+      if (isCreditPayment) {
+        netAPMovement += amount;
+      } else {
+        adjustCashMovement(po.accountId || null, -amount);
+        adjustDirectorCAMovement(po.accountId || null, amount);
+      }
+    });
+
     // Process fixed assets
     fixedAssets.forEach(asset => {
       const purchaseAmt = Number(asset.purchasePrice || 0);
@@ -702,7 +799,7 @@ const Reports: React.FC<ReportsProps> = ({
     }
 
     return [...openingPostings, ...entries];
-  }, [transactions, products, accounts, customers, vendors, fixedAssets]);
+  }, [transactions, products, categories, purchaseOrders, accounts, customers, vendors, fixedAssets]);
 
   // 2. Generate running balance for each posting chronologically
   const entriesWithRunningBalance = useMemo(() => {
@@ -727,11 +824,11 @@ const Reports: React.FC<ReportsProps> = ({
 
   // 3. Apply branch, account, date, and search query filters
   const filteredLedger = useMemo(() => {
-    return entriesWithRunningBalance.filter(entry => {
+    const matched = entriesWithRunningBalance.filter(entry => {
       const matchAccount = selectedAccount === 'All Accounts' || entry.account === selectedAccount;
       const matchBranch = selectedBranch === 'ALL' || entry.branchId === 'ALL' || entry.branchId === selectedBranch;
 
-      const dateStr = entry.date.split('T')[0];
+      const dateStr = (entry.date || '').split('T')[0];
       const matchStartDate = !startDate || dateStr >= startDate;
       const matchEndDate = !endDate || dateStr <= endDate;
 
@@ -743,6 +840,36 @@ const Reports: React.FC<ReportsProps> = ({
 
       return matchAccount && matchBranch && matchStartDate && matchEndDate && matchSearch;
     });
+
+    if (selectedAccount !== 'All Accounts' && startDate && !searchQuery) {
+      const priorEntries = entriesWithRunningBalance.filter(entry => {
+        const matchAccount = entry.account === selectedAccount;
+        const matchBranch = selectedBranch === 'ALL' || entry.branchId === 'ALL' || entry.branchId === selectedBranch;
+        const dateStr = (entry.date || '').split('T')[0];
+        return matchAccount && matchBranch && dateStr < startDate;
+      });
+      if (priorEntries.length > 0) {
+        const lastPrior = priorEntries[priorEntries.length - 1];
+        const isCreditNormal = ['Sales Revenue', 'Accounts Payable', 'Share Capital', 'Director C/A', 'Owner Equity / Retained Earnings'].includes(selectedAccount);
+        const bal = lastPrior.runningBalance;
+        const bfEntry = {
+          id: `bf-${selectedAccount}-${startDate}`,
+          date: `${startDate}T00:00:00`,
+          timestamp: Date.parse(`${startDate}T00:00:00`) || 0,
+          refId: 'B/F-BAL',
+          type: 'SYSTEM',
+          description: `Balance Brought Forward as at ${startDate}`,
+          account: selectedAccount,
+          debit: (!isCreditNormal && bal >= 0) || (isCreditNormal && bal < 0) ? Math.abs(bal) : 0,
+          credit: (isCreditNormal && bal >= 0) || (!isCreditNormal && bal < 0) ? Math.abs(bal) : 0,
+          branchId: selectedBranch,
+          runningBalance: bal
+        };
+        return [bfEntry, ...matched];
+      }
+    }
+
+    return matched;
   }, [entriesWithRunningBalance, selectedAccount, selectedBranch, startDate, endDate, searchQuery]);
 
   // 4. Calculate account balance summary
@@ -894,7 +1021,7 @@ const Reports: React.FC<ReportsProps> = ({
       </div>
 
       {/* Filter panel */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end no-print">
+      <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 items-end no-print">
         <div className="flex flex-col gap-1.5">
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Select Account</label>
           <select 
@@ -927,7 +1054,11 @@ const Reports: React.FC<ReportsProps> = ({
           <input 
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setStartDate(val);
+              if (onFetchData) onFetchData(val, endDate);
+            }}
             className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
@@ -937,10 +1068,30 @@ const Reports: React.FC<ReportsProps> = ({
           <input 
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setEndDate(val);
+              if (onFetchData) onFetchData(startDate, val);
+            }}
             className="w-full bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs text-slate-700 font-medium outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
           />
         </div>
+
+        {onFetchData && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Database</label>
+            <button
+              type="button"
+              disabled={isLoadingMore}
+              onClick={() => onFetchData(startDate, endDate)}
+              className="w-full px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50 active:scale-95"
+              title="Fetch all data for selected date range"
+            >
+              <span>{isLoadingMore ? '⏳' : '⚡'}</span>
+              <span>{isLoadingMore ? 'Fetching...' : 'Fetch Data'}</span>
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Search journal</label>

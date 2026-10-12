@@ -226,6 +226,7 @@ const Purchases: React.FC<PurchasesProps> = ({
         date: new Date(poDate).toISOString(),
         vendorId,
         items: poItems.map(item => {
+          const sanitizedFreeQty = Math.round(Number(item.freeQuantity) || 0);
           // If metadata is missing, try to find it now to persist it
           if (!item.productName || !item.productSku) {
             const p = products.find(p => p.id === item.productId) ||
@@ -236,11 +237,14 @@ const Purchases: React.FC<PurchasesProps> = ({
                 ...item,
                 productName: p.name,
                 productSku: p.sku,
-                freeQuantity: Number(item.freeQuantity) || 0
+                freeQuantity: sanitizedFreeQty
               };
             }
           }
-          return item;
+          return {
+            ...item,
+            freeQuantity: sanitizedFreeQty
+          };
         }),
         status: currentPOStatus,
         totalAmount,
@@ -471,7 +475,10 @@ const Purchases: React.FC<PurchasesProps> = ({
   const updatePOItem = (index: number, field: keyof PurchaseOrderItem, value: string | number) => {
     setPoItems(prev => {
       const updated = [...prev];
-      const numVal = isNaN(parseFloat(String(value))) ? 0 : parseFloat(String(value));
+      let numVal = isNaN(parseFloat(String(value))) ? 0 : parseFloat(String(value));
+      if (field === 'freeQuantity') {
+        numVal = isNaN(parseInt(String(value), 10)) ? 0 : Math.max(0, parseInt(String(value), 10));
+      }
       if (field === 'discountPercent' || field === 'discount') {
         updated[index] = { ...updated[index], discountPercent: numVal, discount: numVal };
       } else {
@@ -527,7 +534,7 @@ const Purchases: React.FC<PurchasesProps> = ({
             productName: (product?.name ? (i.size ? `${product.name} [${i.size}]` : product.name) : i.productName) || 'Unknown Item',
             productSku: i.productSku || product?.sku || 'N/A',
             quantity: Number(i.quantity) || 0,
-            freeQuantity: Number(i.freeQuantity) || 0,
+            freeQuantity: Math.round(Number(i.freeQuantity) || 0),
             cost: Number(i.cost) || 0,
             discountPercent: discPct,
             discount: discPct,
@@ -645,7 +652,10 @@ const Purchases: React.FC<PurchasesProps> = ({
 
       setPoDate(po.date.split('T')[0]);
       setPoNotes(po.notes || '');
-      setPoItems(po.items);
+      setPoItems((po.items || []).map(item => ({
+        ...item,
+        freeQuantity: item.freeQuantity !== undefined ? Math.round(Number(item.freeQuantity) || 0) : 0
+      })));
       setPoMainCategory(po.mainCategory || '');
       setPoCategory(po.category || '');
       setPoBranchId(po.branchId || userProfile.branch);
@@ -1919,8 +1929,9 @@ const Purchases: React.FC<PurchasesProps> = ({
                                 <td className="px-2 py-3">
                                   <input
                                     type="number"
-                                    step="0.001"
-                                    value={item.freeQuantity || 0}
+                                    step="1"
+                                    min="0"
+                                    value={item.freeQuantity !== undefined && item.freeQuantity !== null ? Math.round(Number(item.freeQuantity)) : 0}
                                     onFocus={e => e.target.select()}
                                     onChange={e => updatePOItem(idx, 'freeQuantity', e.target.value)}
                                     className="w-full min-w-[80px] px-2 py-1.5 rounded-lg border border-slate-200 font-black font-mono text-[11px] text-emerald-600 text-center bg-white focus:border-indigo-500 transition-all outline-none"

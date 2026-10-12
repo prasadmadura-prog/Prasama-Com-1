@@ -84,6 +84,19 @@ const INITIAL_FUTURE_CHEQUES: FutureChequeItem[] = [
   }
 ];
 
+export const getChequeDaysDiff = (dateStr: string): number => {
+  if (!dateStr) return 0;
+  const parts = dateStr.split('-');
+  if (parts.length < 3) return 0;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  const release = new Date(y, m, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((release.getTime() - today.getTime()) / (1000 * 3600 * 24));
+};
+
 const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders }) => {
   // Top Level Tab State: 'terminal' | 'future_release'
   const [activeSubTab, setActiveSubTab] = useState<'terminal' | 'future_release'>('terminal');
@@ -282,7 +295,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
   const [inlinePayeeValue, setInlinePayeeValue] = useState<string>('');
 
   // Filter & Search State for Future Release Cheques Tab
-  const [statusFilter, setStatusFilter] = useState<'all' | 'future_release' | 'cleared'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'future_release' | 'past_due' | 'cleared'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modal State for Adding/Editing Future Cheque
@@ -789,22 +802,52 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
   };
 
   // KPI Calculations
-  const futurePendingList = useMemo(() => futureCheques.filter(c => c.status === 'future_release'), [futureCheques]);
-  const clearedList = useMemo(() => futureCheques.filter(c => c.status === 'cleared'), [futureCheques]);
+  // Uncleared Upcoming Cheques (Release date today or in future)
+  const upcomingList = useMemo(() => {
+    return futureCheques.filter(c => c.status !== 'cleared' && getChequeDaysDiff(c.date) >= 0);
+  }, [futureCheques]);
 
-  const totalFuturePendingAmount = useMemo(() => futurePendingList.reduce((sum, c) => sum + (c.amount || 0), 0), [futurePendingList]);
+  // Uncleared Past Due / Overdue Cheques ("Days Past")
+  const pastDueList = useMemo(() => {
+    return futureCheques.filter(c => c.status !== 'cleared' && getChequeDaysDiff(c.date) < 0);
+  }, [futureCheques]);
+
+  // Cleared Cheques
+  const clearedList = useMemo(() => {
+    return futureCheques.filter(c => c.status === 'cleared');
+  }, [futureCheques]);
+
+  // All Pending Cheques (Upcoming + Past Due)
+  const allPendingList = useMemo(() => {
+    return futureCheques.filter(c => c.status !== 'cleared');
+  }, [futureCheques]);
+
+  // Kept for backward compatibility
+  const futurePendingList = upcomingList;
+
+  const totalUpcomingAmount = useMemo(() => upcomingList.reduce((sum, c) => sum + (c.amount || 0), 0), [upcomingList]);
+  const totalPastDueAmount = useMemo(() => pastDueList.reduce((sum, c) => sum + (c.amount || 0), 0), [pastDueList]);
+  const totalFuturePendingAmount = totalUpcomingAmount;
   const totalClearedAmount = useMemo(() => clearedList.reduce((sum, c) => sum + (c.amount || 0), 0), [clearedList]);
 
-  // Next Upcoming Release Cheque
+  // Next Upcoming Release Cheque (Strictly upcoming/today cheques, never past due)
   const nextReleaseCheque = useMemo(() => {
-    if (futurePendingList.length === 0) return null;
-    return [...futurePendingList].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
-  }, [futurePendingList]);
+    if (upcomingList.length === 0) return null;
+    return [...upcomingList].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+  }, [upcomingList]);
 
   // Filtered Cheques List
   const filteredFutureCheques = useMemo(() => {
     return futureCheques.filter(item => {
-      const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
+      let matchesStatus = true;
+      if (statusFilter === 'cleared') {
+        matchesStatus = item.status === 'cleared';
+      } else if (statusFilter === 'future_release') {
+        matchesStatus = item.status !== 'cleared' && getChequeDaysDiff(item.date) >= 0;
+      } else if (statusFilter === 'past_due') {
+        matchesStatus = item.status !== 'cleared' && getChequeDaysDiff(item.date) < 0;
+      }
+
       const q = (searchQuery || '').toLowerCase();
       const matchesQuery = !q ||
         (item.chequeNumber || '').toLowerCase().includes(q) ||
@@ -869,11 +912,15 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
             }`}
           >
             <span>📅</span> Future Release Cheques
-            {futurePendingList.length > 0 && (
+            {(upcomingList.length > 0 || pastDueList.length > 0) && (
               <span className={`ml-1 px-2 py-0.5 rounded-full text-[9px] font-black ${
-                activeSubTab === 'future_release' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500 text-slate-950'
+                pastDueList.length > 0
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : activeSubTab === 'future_release'
+                  ? 'bg-slate-950 text-amber-400'
+                  : 'bg-amber-500 text-slate-950'
               }`}>
-                {futurePendingList.length}
+                {upcomingList.length + pastDueList.length}
               </span>
             )}
           </button>
@@ -2243,12 +2290,35 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-950/70">Future Release Value</p>
                   <h4 className="text-2xl font-black mt-1 tracking-tight">
-                    LKR {totalFuturePendingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    LKR {totalUpcomingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </h4>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-slate-950/10 flex items-center justify-center text-lg">⏳</div>
               </div>
-              <p className="text-[11px] font-bold mt-4 text-slate-950/80">{futurePendingList.length} Pending Cheques Scheduled</p>
+              <p className="text-[11px] font-bold mt-4 text-slate-950/80">{upcomingList.length} Upcoming Cheques Scheduled</p>
+            </div>
+
+            <div className={`p-6 rounded-3xl shadow-xl relative overflow-hidden ${
+              pastDueList.length > 0
+                ? 'bg-gradient-to-br from-rose-600 to-red-700 text-white shadow-rose-600/20'
+                : 'bg-slate-900 text-white shadow-slate-900/10'
+            }`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${pastDueList.length > 0 ? 'text-rose-200' : 'text-slate-400'}`}>
+                    Past Due Cheques Value
+                  </p>
+                  <h4 className="text-2xl font-black mt-1 tracking-tight">
+                    LKR {totalPastDueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </h4>
+                </div>
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${pastDueList.length > 0 ? 'bg-white/10' : 'bg-slate-800'}`}>
+                  ⚠️
+                </div>
+              </div>
+              <p className={`text-[11px] font-bold mt-4 ${pastDueList.length > 0 ? 'text-rose-100' : 'text-slate-400 font-medium'}`}>
+                {pastDueList.length > 0 ? `${pastDueList.length} Cheques Past Release Date ("Days Past")` : '0 Overdue Cheques'}
+              </p>
             </div>
 
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 p-6 rounded-3xl text-white shadow-xl shadow-emerald-600/10 relative overflow-hidden">
@@ -2262,19 +2332,6 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                 <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-lg">✅</div>
               </div>
               <p className="text-[11px] font-medium mt-4 text-emerald-100">{clearedList.length} Cheques Marked as Cleared</p>
-            </div>
-
-            <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-xl shadow-slate-900/10 relative overflow-hidden">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400">Total Managed Value</p>
-                  <h4 className="text-2xl font-black mt-1 tracking-tight">
-                    LKR {(totalFuturePendingAmount + totalClearedAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </h4>
-                </div>
-                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 flex items-center justify-center text-lg text-indigo-300">📊</div>
-              </div>
-              <p className="text-[11px] font-medium mt-4 text-slate-400">{futureCheques.length} Total Cheque Records</p>
             </div>
 
             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
@@ -2291,13 +2348,26 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                       </p>
                     </>
                   ) : (
-                    <h4 className="text-sm font-bold text-slate-400 mt-2">No Pending Cheques</h4>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-500 mt-2">
+                        {pastDueList.length > 0 ? 'No Upcoming Cheques' : 'None Scheduled'}
+                      </h4>
+                      {pastDueList.length > 0 && (
+                        <p className="text-[10px] font-bold text-rose-600 mt-0.5">
+                          {pastDueList.length} pending cheques are past due
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center text-lg text-amber-600">🔔</div>
               </div>
               <p className="text-[10px] font-bold text-slate-400 mt-4 uppercase tracking-wider">
-                {nextReleaseCheque && nextReleaseCheque.payee && !nextReleaseCheque.payee.startsWith('PAYEE -') ? nextReleaseCheque.payee : 'Click table to set payee'}
+                {nextReleaseCheque && nextReleaseCheque.payee && !nextReleaseCheque.payee.startsWith('PAYEE -')
+                  ? nextReleaseCheque.payee
+                  : pastDueList.length > 0
+                  ? 'Review Overdue Cheques'
+                  : 'All Cheques Clear'}
               </p>
             </div>
           </div>
@@ -2305,7 +2375,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
           {/* Filter & Action Controls Bar */}
           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
             {/* Status Filter Buttons */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-2xl gap-1 border border-slate-200/50">
+            <div className="flex flex-wrap items-center bg-slate-100 p-1 rounded-2xl gap-1 border border-slate-200/50">
               <button
                 onClick={() => setStatusFilter('all')}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -2316,19 +2386,31 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
               </button>
               <button
                 onClick={() => setStatusFilter('future_release')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                   statusFilter === 'future_release' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                ⏳ Future Release ({futurePendingList.length})
+                <span>⏳</span> Future Release ({upcomingList.length})
+              </button>
+              <button
+                onClick={() => setStatusFilter('past_due')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  statusFilter === 'past_due'
+                    ? 'bg-rose-600 text-white shadow-sm'
+                    : pastDueList.length > 0
+                    ? 'text-rose-600 font-extrabold hover:bg-rose-50'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>⚠️</span> Past Due / Days Past ({pastDueList.length})
               </button>
               <button
                 onClick={() => setStatusFilter('cleared')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                   statusFilter === 'cleared' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                ✅ Cleared ({clearedList.length})
+                <span>✅</span> Cleared ({clearedList.length})
               </button>
             </div>
 
@@ -2356,8 +2438,11 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
           {/* Cheques List Table */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">
-                Future Release Cheque Schedule ({filteredFutureCheques.length})
+              <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                {statusFilter === 'future_release' && <span>⏳ Future Release Cheque Schedule ({filteredFutureCheques.length})</span>}
+                {statusFilter === 'past_due' && <span className="text-rose-600 font-black">⚠️ Past Due / Days Past Cheques ({filteredFutureCheques.length})</span>}
+                {statusFilter === 'cleared' && <span className="text-emerald-700">✅ Cleared Cheques Schedule ({filteredFutureCheques.length})</span>}
+                {statusFilter === 'all' && <span>All Cheques Schedule ({filteredFutureCheques.length})</span>}
               </h3>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 Click Payee name to edit directly
@@ -2385,10 +2470,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                   <tbody className="divide-y divide-slate-100 text-xs font-medium">
                     {filteredFutureCheques.map((item) => {
                       const isCleared = item.status === 'cleared';
-                      const releaseDate = new Date(item.date);
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      const diffDays = Math.ceil((releaseDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+                      const diffDays = getChequeDaysDiff(item.date);
                       const isInlineEditing = inlineEditingId === item.id;
                       const hasRealPayee = item.payee && item.payee.trim() !== '' && !item.payee.startsWith('PAYEE -');
 
@@ -2396,7 +2478,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                         <tr
                           key={item.id}
                           className={`hover:bg-slate-50/80 transition-colors ${
-                            isCleared ? 'bg-amber-50/30' : ''
+                            isCleared ? 'bg-emerald-50/20' : diffDays < 0 ? 'bg-rose-50/25' : ''
                           }`}
                         >
                           <td className="py-4 px-6 font-mono font-black text-sm text-slate-900">
@@ -2406,7 +2488,7 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                             <div className="font-bold text-slate-800">{item.date}</div>
                             {!isCleared && (
                               <div className={`text-[10px] font-bold ${
-                                diffDays <= 0 ? 'text-rose-600' : diffDays <= 5 ? 'text-amber-600' : 'text-slate-400'
+                                diffDays < 0 ? 'text-rose-600 font-extrabold' : diffDays === 0 ? 'text-amber-600 font-black' : 'text-slate-400'
                               }`}>
                                 {diffDays < 0 ? `${Math.abs(diffDays)} Days Past` : diffDays === 0 ? 'Release Today!' : `In ${diffDays} Days`}
                               </div>
@@ -2497,11 +2579,19 @@ const ChequePrint: React.FC<ChequePrintProps> = ({ vendors = [], purchaseOrders 
                           </td>
                           <td className="py-4 px-6 text-center">
                             {isCleared ? (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-100 text-orange-800 border border-orange-200">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <span>✅</span> Cleared
                               </span>
-                            ) : (
+                            ) : diffDays < 0 ? (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 shadow-sm">
+                                <span>⚠️</span> Past Due
+                              </span>
+                            ) : diffDays === 0 ? (
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 shadow-sm animate-pulse">
+                                <span>🔔</span> Release Today!
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-900 border border-amber-200 shadow-sm">
                                 <span>⏳</span> Future Release
                               </span>
                             )}

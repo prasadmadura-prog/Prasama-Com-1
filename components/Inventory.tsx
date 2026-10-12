@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import JsBarcode from 'jsbarcode';
 import { Product, ProductVariant, ProductBatch, Category, Vendor, UserProfile } from '../types';
 import { recalculateProductSummary, createNewBatch } from '../utils/batchInventoryUtils';
+import { isHotReloadProduct, getReloadCommissionPercent, getReloadCostRate } from '../utils/reloadUtils';
 
 interface InventoryProps {
   products: Product[];
@@ -61,6 +62,7 @@ const Inventory: React.FC<InventoryProps> = ({
 
   const [costValue, setCostValue] = useState<number>(0);
   const [priceValue, setPriceValue] = useState<number>(0);
+  const [reloadCommissionPct, setReloadCommissionPct] = useState<number>(4);
   const [skuValue, setSkuValue] = useState('');
   const [imageUrlValue, setImageUrlValue] = useState<string>('');
   const [branchStocksState, setBranchStocksState] = useState<Record<string, number>>({});
@@ -78,6 +80,16 @@ const Inventory: React.FC<InventoryProps> = ({
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [viewingCategory, setViewingCategory] = useState<Category | null>(null);
+
+  const selectedCategoryObj = useMemo(
+    () => (categories || []).find(c => c && c.id === selectedCategoryId),
+    [categories, selectedCategoryId]
+  );
+
+  const isReloadClassification = useMemo(() => {
+    const cName = (selectedCategoryObj?.name || '').toUpperCase().trim();
+    return cName.includes('RELOAD') && !cName.includes('CARD');
+  }, [selectedCategoryObj]);
 
   const importInputRef = useRef<HTMLInputElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -157,6 +169,8 @@ const Inventory: React.FC<InventoryProps> = ({
   useEffect(() => {
     if (editingProduct) {
       setSelectedCategoryId(editingProduct.categoryId || '');
+      const commPct = getReloadCommissionPercent(editingProduct);
+      setReloadCommissionPct(commPct);
       setCostValue(editingProduct.cost || 0);
       setPriceValue(editingProduct.price || 0);
       setSkuValue(editingProduct.sku);
@@ -174,6 +188,7 @@ const Inventory: React.FC<InventoryProps> = ({
       setBatchesState(editingProduct.batches ? JSON.parse(JSON.stringify(editingProduct.batches)) : []);
       setShowBatchHistory(false);
     } else {
+      setReloadCommissionPct(4);
       setCostValue(0);
       setPriceValue(0);
       setImageUrlValue('');
@@ -196,6 +211,14 @@ const Inventory: React.FC<InventoryProps> = ({
       }
     }
   }, [editingProduct, categories, isModalOpen]);
+
+  useEffect(() => {
+    if (isReloadClassification) {
+      const effectivePrice = priceValue > 0 ? priceValue : 1;
+      const costPct = Math.max(0, Math.min(100, 100 - reloadCommissionPct));
+      setCostValue(Number((effectivePrice * (costPct / 100)).toFixed(4)));
+    }
+  }, [isReloadClassification, reloadCommissionPct, priceValue]);
 
   const handleAddPresetSizes = (presetSizes: string[]) => {
     const existingSizes = new Set(variantsState.map(v => (v.size || '').toUpperCase()));
@@ -307,8 +330,10 @@ const Inventory: React.FC<InventoryProps> = ({
     if (products.length === 0) return alert("Catalog is empty.");
     const headers = ['Name', 'SKU', 'Cost', 'Price', 'Global Stock', 'Cashier 1', 'Cashier 2', 'Cashier 3', 'Cashier 4', 'Total Cost Value', 'Total Sales Value', 'Category', 'Primary Vendor', 'Alert Threshold'];
     const rows = products.map(p => {
-      const cost = Number(p.cost) || 0;
+      const cat = (categories || []).find(c => c && c.id === p.categoryId);
+      const isReload = isHotReloadProduct(p, cat);
       const price = Number(p.price) || 0;
+      const cost = isReload ? Number(((price || 1) * getReloadCostRate(p)).toFixed(4)) : (Number(p.cost) || 0);
       const stock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (Number(p.stock) || 0);
       
       return [
@@ -388,14 +413,24 @@ const Inventory: React.FC<InventoryProps> = ({
 
     const totalCalculatedStock = Object.values(bStocks).reduce((a, b) => a + (Number(b) || 0), 0);
 
+    const effectivePrice = isReloadClassification ? (priceValue > 0 ? priceValue : 1) : priceValue;
+    const costPct = Math.max(0, Math.min(100, 100 - reloadCommissionPct));
+    const effectiveCost = isReloadClassification
+      ? Number((effectivePrice * (costPct / 100)).toFixed(4))
+      : costValue;
+
     let productData: Product = {
       id: editingProduct?.id || `P-${Date.now()}`,
       name: (formData.get('name') as string).toUpperCase(),
       sku: finalSku.toUpperCase(),
       categoryId: selectedCategoryId,
       vendorId: formData.get('vendorId') as string || '',
-      cost: costValue,
-      price: priceValue,
+      cost: effectiveCost,
+      price: effectivePrice,
+      ...(isReloadClassification ? {
+        reloadCommissionPercent: Number(reloadCommissionPct.toFixed(4)),
+        reloadCostPercent: Number(costPct.toFixed(4))
+      } : {}),
       branchStocks: bStocks,
       stock: totalCalculatedStock,
       lowStockThreshold: parseInt(formData.get('lowStockThreshold') as string) || 5,
@@ -585,14 +620,18 @@ const Inventory: React.FC<InventoryProps> = ({
                 const isAll = selectedBranch === 'ALL CASHIERS';
                 const gStock = p.branchStocks ? ['CASHIER 1', 'CASHIER 2', 'CASHIER 3', 'CASHIER 4'].reduce((a, b) => a + (Number(p.branchStocks![b]) || 0), 0) : (Number(p.stock) || 0);
                 const bStock = isAll ? gStock : (p.branchStocks ? (Number(p.branchStocks[selectedBranch]) || 0) : (Number(p.stock) || 0));
+                const cat = (categories || []).find(c => c && c.id === p.categoryId);
+                const isReload = isHotReloadProduct(p, cat);
+                const unitPrice = Number(p.price) || 0;
+                const unitCost = isReload ? ((unitPrice || 1) * getReloadCostRate(p)) : (Number(p.cost) || 0);
 
                 return {
                   unitsBranch: acc.unitsBranch + bStock,
                   unitsGlobal: acc.unitsGlobal + gStock,
-                  valueRetailBranch: acc.valueRetailBranch + (bStock * (Number(p.price) || 0)),
-                  valueCostBranch: acc.valueCostBranch + (bStock * (Number(p.cost) || 0)),
-                  valueRetailGlobal: acc.valueRetailGlobal + (gStock * (Number(p.price) || 0)),
-                  valueCostGlobal: acc.valueCostGlobal + (gStock * (Number(p.cost) || 0))
+                  valueRetailBranch: acc.valueRetailBranch + (bStock * unitPrice),
+                  valueCostBranch: acc.valueCostBranch + (bStock * unitCost),
+                  valueRetailGlobal: acc.valueRetailGlobal + (gStock * unitPrice),
+                  valueCostGlobal: acc.valueCostGlobal + (gStock * unitCost)
                 };
               }, { unitsBranch: 0, unitsGlobal: 0, valueRetailBranch: 0, valueCostBranch: 0, valueRetailGlobal: 0, valueCostGlobal: 0 });
 
@@ -969,20 +1008,108 @@ const Inventory: React.FC<InventoryProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-                        {hasSizesState ? 'Default / Base Cost' : 'Unit Cost'}
-                      </label>
-                      <input type="number" step="0.01" value={costValue} onChange={e => handleCostChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none text-slate-800 bg-white" />
+                  {isReloadClassification ? (
+                    <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">
+                          📶 Reload Provider Cost Calculation (% of Selling Price)
+                        </span>
+                        <div className="flex gap-1.5">
+                          {[4, 5, 6].map(pct => (
+                            <button
+                              key={pct}
+                              type="button"
+                              onClick={() => setReloadCommissionPct(pct)}
+                              className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase transition-all ${
+                                reloadCommissionPct === pct
+                                  ? 'bg-indigo-600 text-white shadow-sm'
+                                  : 'bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {pct}% Margin
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 block">
+                            Provider Margin (%)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="100"
+                              value={reloadCommissionPct}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value);
+                                setReloadCommissionPct(isNaN(val) ? 0 : Math.max(0, Math.min(100, val)));
+                              }}
+                              required
+                              className="w-full px-3 py-2.5 pr-7 rounded-xl border border-emerald-200 font-black font-mono text-[13px] outline-none text-emerald-700 bg-white"
+                            />
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-black text-emerald-500">%</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 block">
+                            Unit Cost (% of Price)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="100"
+                              value={Number((100 - reloadCommissionPct).toFixed(2))}
+                              onChange={e => {
+                                const costPct = parseFloat(e.target.value);
+                                const validCostPct = isNaN(costPct) ? 96 : Math.max(0, Math.min(100, costPct));
+                                setReloadCommissionPct(Number((100 - validCostPct).toFixed(2)));
+                              }}
+                              required
+                              className="w-full px-3 py-2.5 pr-7 rounded-xl border border-slate-200 font-black font-mono text-[13px] outline-none text-slate-800 bg-white"
+                            />
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">%</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1 text-right block">
+                            Base Selling Price
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={priceValue || 1}
+                            onChange={e => handlePriceChange(parseFloat(e.target.value) || 1)}
+                            required
+                            className="w-full px-3 py-2.5 rounded-xl border border-indigo-200 font-black font-mono text-[13px] text-indigo-700 outline-none text-right bg-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider bg-white px-3 py-2 rounded-xl border border-indigo-100 text-slate-600">
+                        <span>Calculated Unit Cost: <span className="text-indigo-600 font-mono">Selling Price × {Number((100 - reloadCommissionPct).toFixed(2))}%</span></span>
+                        <span className="font-mono text-emerald-600">Rs. {costValue} per Rs. {priceValue || 1}</span>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-right">
-                        {hasSizesState ? 'Default / Base Price' : 'Selling Price'}
-                      </label>
-                      <input type="number" step="0.01" value={priceValue} onChange={e => handlePriceChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-indigo-200 font-black font-mono text-[14px] text-indigo-700 outline-none text-right bg-white" />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                          {hasSizesState ? 'Default / Base Cost' : 'Unit Cost'}
+                        </label>
+                        <input type="number" step="0.01" value={costValue} onChange={e => handleCostChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-slate-200 font-black font-mono text-[14px] outline-none text-slate-800 bg-white" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 text-right">
+                          {hasSizesState ? 'Default / Base Price' : 'Selling Price'}
+                        </label>
+                        <input type="number" step="0.01" value={priceValue} onChange={e => handlePriceChange(parseFloat(e.target.value) || 0)} required className="w-full px-4 py-3 rounded-2xl border border-indigo-200 font-black font-mono text-[14px] text-indigo-700 outline-none text-right bg-white" />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* SIZE VARIATIONS ACCORDION / TOGGLE */}
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
